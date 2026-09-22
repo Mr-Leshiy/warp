@@ -53,5 +53,37 @@ def test_raising_task_raises_from_nested_coroutine() raises:
             _ = task^.wait()
 
 
+def test_raising_task_executor_wait_raises_immediately() raises:
+    with DeviceContext() as ctx:
+        var executor = Executor(ctx)
+        var task = executor.add(_raises_immediately())
+
+        executor.wait()
+        with assert_raises(contains="immediate failure"):
+            _ = task^.wait()
+
+
+def test_raising_task_executor_wait_raises_after_yields() raises:
+    with DeviceContext() as ctx:
+        var executor = Executor(ctx)
+        var context = executor.context()
+        var task = executor.add(_raises_after_yields(context))
+
+        executor.wait()
+        with assert_raises(contains="failure after yields"):
+            _ = task^.wait()
+
+
+def test_raising_task_executor_wait_raises_from_nested_coroutine() raises:
+    with DeviceContext() as ctx:
+        var executor = Executor(ctx)
+        var context = executor.context()
+        var task = executor.add(_raises_from_nested_coroutine(context))
+
+        executor.wait()
+        with assert_raises(contains="nested failure"):
+            _ = task^.wait()
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()
