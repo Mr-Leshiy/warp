@@ -6,9 +6,12 @@ from warp.context import Context
 from warp.executor import Executor
 
 
-# `square` is a stand-in kernel: any real device work would do. Workaround
-# for a nightly compiler bug: helpers keep GPU host-API calls out of the
-# `async def` body and the kernel out of module scope.
+# Workaround for a nightly compiler crash: `enqueue_copy`/`enqueue_function`
+# called directly inside an `async def` body crash the compiler, so both
+# calls are made from these plain `def`s instead (`enqueue_create_buffer` is
+# unaffected and stays inline in the `async def`s below). Split in two,
+# rather than one function covering the whole round trip, because
+# `_square_n_times` below needs to `await` in between.
 def _copy_to_device[
     size: Int
 ](
@@ -19,9 +22,13 @@ def _copy_to_device[
     ctx.gpu_ctx().enqueue_copy(dst_buf=device_buffer, src_ptr=src)
 
 
-def _launch_square_kernel[
+def _launch_square_kernel_and_copy_from_device[
     size: Int
-](ctx: Context, device_buffer: DeviceBuffer[DType.float32]) raises:
+](
+    ctx: Context,
+    device_buffer: DeviceBuffer[DType.float32],
+    dst: Pointer[Float32, MutAnyOrigin],
+) raises:
     def square_kernel(buf: Pointer[Float32, MutAnyOrigin]):
         var idx = global_idx.x
 
@@ -31,18 +38,10 @@ def _launch_square_kernel[
     ctx.gpu_ctx().enqueue_function[square_kernel](
         device_buffer, grid_dim=1, block_dim=size
     )
-
-
-def _copy_from_device[
-    size: Int
-](
-    ctx: Context,
-    dst: Pointer[Float32, MutAnyOrigin],
-    device_buffer: DeviceBuffer[DType.float32],
-) raises:
     ctx.gpu_ctx().enqueue_copy(dst_ptr=dst, src_buf=device_buffer)
 
 
+# `square` is a stand-in kernel: any real device work would do.
 async def square[
     size: Int
 ](ctx: Context, input: Array[Float32, size]) raises -> Array[Float32, size]:
@@ -53,13 +52,11 @@ async def square[
         input.unsafe_ptr().unsafe_origin_cast[ImmutAnyOrigin](),
     )
 
-    _launch_square_kernel[size](ctx, device_buffer)
-
     var result = Array[Float32, size](uninitialized=True)
-    _copy_from_device[size](
+    _launch_square_kernel_and_copy_from_device[size](
         ctx,
-        result.unsafe_ptr().unsafe_origin_cast[MutAnyOrigin](),
         device_buffer,
+        result.unsafe_ptr().unsafe_origin_cast[MutAnyOrigin](),
     )
     await ctx.synchronize()
     return result^
@@ -175,13 +172,11 @@ async def _square_n_times(
         )
         await ctx.synchronize()
 
-        _launch_square_kernel[_SCALE_SIZE](ctx, device_buffer)
-
         var result = Array[Float32, _SCALE_SIZE](uninitialized=True)
-        _copy_from_device[_SCALE_SIZE](
+        _launch_square_kernel_and_copy_from_device[_SCALE_SIZE](
             ctx,
-            result.unsafe_ptr().unsafe_origin_cast[MutAnyOrigin](),
             device_buffer,
+            result.unsafe_ptr().unsafe_origin_cast[MutAnyOrigin](),
         )
         await ctx.synchronize()
         current = result^
