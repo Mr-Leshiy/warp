@@ -6,5 +6,5 @@ let the others make progress.
 """
 
 from .executor import Executor
-from .task import Task
+from .task import Task, RaisingTask
 from .context import Context
