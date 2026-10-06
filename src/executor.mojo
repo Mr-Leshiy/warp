@@ -76,7 +76,27 @@ struct Executor(Copyable):
         """Queue a bare coroutine handle, without a task tracking it.
 
         Meant for a coroutine re-queuing itself from a suspend body, e.g.
-        one passed to `_suspend_async`. 
+        one passed to `_suspend_async`.
+
+        Note:
+            A suspend body that only calls this is straight-line code, which
+            can trigger a compiler crash
+            (https://github.com/modular/modular/issues/7257): a small `raises`
+            coroutine that suspends this way gets inlined into the `raises`
+            coroutine awaiting it, and lowering fails with
+            `'pop.cast_from_builtin' op cannot convert to scalar dtype bool`.
+            To work around it on the caller side, mark the awaited `raises`
+            coroutine `@no_inline`:
+
+            ```mojo
+            @no_inline
+            async def inner(executor: Executor) raises -> Int:
+                await suspend(executor)  # suspends via `executor.add(hdl)`
+                raise Error("failure")
+
+            async def outer(executor: Executor) raises -> Int:
+                return await inner(executor)
+            ```
 
         Args:
             handle: The coroutine to resume. The caller keeps ownership of it.
