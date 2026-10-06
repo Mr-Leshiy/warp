@@ -15,6 +15,8 @@ from .context import Context
 from .task import RaisingTask, Task
 
 
+# TODO: revisit `Copyable` (added so tests can hand coroutines their own
+# executor handle); consider making `Executor` `Movable` only again.
 struct Executor(Copyable):
     """Runs coroutines that share one GPU device context.
 
