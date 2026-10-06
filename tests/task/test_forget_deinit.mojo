@@ -1,5 +1,9 @@
 """`forget_deinit` bookkeeping: a task's unwritten result/error slot must
 not be deinitialized, and a written result must be dropped exactly once.
+
+These tests check `RaisingTask`'s slot ownership and destruction, not
+executor behavior. The executor is only used to run the coroutine to
+completion.
 """
 
 from max.gpu.host import DeviceContext
