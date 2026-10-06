@@ -15,11 +15,12 @@ from .context import Context
 from .task import RaisingTask, Task
 
 
-struct Executor(Movable):
+struct Executor(Copyable):
     """Runs coroutines that share one GPU device context.
 
     Tasks are queued by `add` and only make progress inside `wait`, which
-    resumes them in turn until every one of them has completed.
+    resumes them in turn until every one of them has completed. Copies share
+    the same queue and device context.
     """
 
     var _inner: ArcPointer[_ExecutorInner]
@@ -70,6 +71,17 @@ struct Executor(Movable):
         """
         task = RaisingTask(handle^, self._inner.copy())
         self._inner[].add(task._handle, False)
+
+    def add(self, handle: AnyCoroutine):
+        """Queue a bare coroutine handle, without a task tracking it.
+
+        Meant for a coroutine re-queuing itself from a suspend body, e.g.
+        one passed to `_suspend_async`. 
+
+        Args:
+            handle: The coroutine to resume. The caller keeps ownership of it.
+        """
+        self._inner[].add(handle, False)
 
     def wait(self) raises:
         """Run queued tasks until all have completed, then sync the device."""
