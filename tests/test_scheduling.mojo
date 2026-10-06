@@ -10,29 +10,30 @@ from max.gpu.host import DeviceContext
 from std.memory import OwnedPointer
 from std.testing import TestSuite, assert_equal, assert_true
 
-from warp.context import Context
 from warp.executor import Executor
 
+from tests.common import suspend
 
-async def _yield_once(context: Context) -> Int:
-    await context.synchronize()
+
+async def _yield_once(executor: Executor) -> Int:
+    await suspend(executor)
     return 1
 
 
-async def _yields_twice[VALUE: Int](context: Context) -> Int:
+async def _yields_twice[VALUE: Int](executor: Executor) -> Int:
     var total = VALUE
-    total += await _yield_once(context)
-    total += await _yield_once(context)
+    total += await _yield_once(executor)
+    total += await _yield_once(executor)
     return total
 
 
 def test_tasks_complete_independently() raises:
     with DeviceContext() as ctx:
         var executor = Executor(ctx)
-        var context = executor.context()
+        var shared = executor.copy()
 
-        var first = executor.add(_yields_twice[10](context))
-        var second = executor.add(_yields_twice[20](context))
+        var first = executor.add(_yields_twice[10](shared))
+        var second = executor.add(_yields_twice[20](shared))
 
         executor.wait()
 
@@ -45,18 +46,18 @@ def test_tasks_complete_independently() raises:
 
 
 async def _increment_twice(
-    context: Context, counter: Pointer[Int, MutUntrackedOrigin]
+    executor: Executor, counter: Pointer[Int, MutUntrackedOrigin]
 ):
     counter[] += 1
-    await context.synchronize()
+    await suspend(executor)
     counter[] += 1
-    await context.synchronize()
+    await suspend(executor)
 
 
 def test_tasks_make_progress_without_corrupting_shared_state() raises:
     with DeviceContext() as ctx:
         var executor = Executor(ctx)
-        var context = executor.context()
+        var shared = executor.copy()
 
         # `counter` has to live behind a pointer, not as a bare local:
         # it's read and written from three coroutines reached through
@@ -66,9 +67,9 @@ def test_tasks_make_progress_without_corrupting_shared_state() raises:
         var counter = OwnedPointer(0)
         var counter_ptr = counter.ptr().unsafe_origin_cast[MutUntrackedOrigin]()
 
-        var t1 = executor.add(_increment_twice(context, counter_ptr))
-        var t2 = executor.add(_increment_twice(context, counter_ptr))
-        var t3 = executor.add(_increment_twice(context, counter_ptr))
+        var t1 = executor.add(_increment_twice(shared, counter_ptr))
+        var t2 = executor.add(_increment_twice(shared, counter_ptr))
+        var t3 = executor.add(_increment_twice(shared, counter_ptr))
 
         executor.wait()
 
@@ -92,12 +93,12 @@ async def _no_yield(value: Int) -> Int:
 def test_mixed_yielding_and_non_yielding_tasks_complete_correctly() raises:
     with DeviceContext() as ctx:
         var executor = Executor(ctx)
-        var context = executor.context()
+        var shared = executor.copy()
 
         var t1 = executor.add(_no_yield(10))
-        var t2 = executor.add(_yield_once(context))
+        var t2 = executor.add(_yield_once(shared))
         var t3 = executor.add(_no_yield(20))
-        var t4 = executor.add(_yield_once(context))
+        var t4 = executor.add(_yield_once(shared))
 
         executor.wait()
 
