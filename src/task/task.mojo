@@ -1,13 +1,15 @@
 from std.builtin._coroutine import AnyCoroutine, Coroutine
+from std.collections.optional import Optional
 from std.memory import ArcPointer
 
 from ..context import _CoroutineContext
 from ..executor import _ExecutorInner
 from .common import (
-    _COMPLETED_FLAG_TYPE,
-    _CompletedFlagPointer,
-    _completed_flag_ptr,
-    _install_completion_callback,
+    TaskCallback,
+    _CompletionHook,
+    _CompletionHookPointer,
+    _completion_hook_ptr,
+    _install_completion_hook,
 )
 
 
@@ -16,33 +18,36 @@ struct Task[type: Deinitable & Movable, origins: OriginSet](
 ):
     """A coroutine queued on an `Executor`, and the result it will produce.
 
-    Immovable: the coroutine writes its result and completion flag through
+    Immovable: the coroutine writes its result and completion hook through
     pointers into this struct.
     """
 
     var _executor: ArcPointer[_ExecutorInner]
     var _handle: AnyCoroutine
-    var _completed: _COMPLETED_FLAG_TYPE
+    var _hook: _CompletionHook
     var _result: Self.type
 
     def __init__(
         out self,
         var handle: Coroutine[Self.type, Self.origins],
         var executor: ArcPointer[_ExecutorInner],
+        callback: Optional[TaskCallback] = None,
     ):
         """Initialize a task with a coroutine.
 
         Takes ownership of the provided coroutine and points it at this task's
-        result slot and completion flag.
+        result slot and completion hook.
 
         Args:
             handle: The coroutine to execute as a task. Ownership is
                 transferred.
             executor: The executor running the coroutine. Ownership is
                 transferred.
+            callback: Called once the coroutine completes, before the task
+                reads as completed. None by default.
         """
         self._executor = executor^
-        self._completed = _COMPLETED_FLAG_TYPE(0)
+        self._hook = _CompletionHook(callback)
 
         # `_result` isn't actually written yet — the coroutine writes it,
         # through the pointer handed to `_set_result_slot` below — but every
@@ -53,9 +58,9 @@ struct Task[type: Deinitable & Movable, origins: OriginSet](
         )
         handle._set_result_slot(Pointer(to=self._result))
 
-        _install_completion_callback(
-            handle._get_ctx[_CoroutineContext[_CompletedFlagPointer]](),
-            _completed_flag_ptr(self._completed),
+        _install_completion_hook(
+            handle._get_ctx[_CoroutineContext[_CompletionHookPointer]](),
+            _completion_hook_ptr(self._hook),
         )
 
         self._handle = handle^._take_handle()
@@ -79,4 +84,4 @@ struct Task[type: Deinitable & Movable, origins: OriginSet](
         A task that has not started, or that is parked on an `await`, reads as
         False; once True, the result is there.
         """
-        return self._completed.load() != 0
+        return self._hook.is_completed()
