@@ -1,13 +1,15 @@
 from std.builtin._coroutine import AnyCoroutine, RaisingCoroutine
+from std.collections.optional import Optional
 from std.memory import ArcPointer, forget_deinit
 
 from ..context import _CoroutineContext
 from ..executor import _ExecutorInner
 from .common import (
-    _COMPLETED_FLAG_TYPE,
-    _CompletedFlagPointer,
-    _completed_flag_ptr,
-    _install_completion_callback,
+    TaskCallback,
+    _CompletionHook,
+    _CompletionHookPointer,
+    _completion_hook_ptr,
+    _install_completion_hook,
 )
 
 
@@ -17,13 +19,13 @@ struct RaisingTask[type: Deinitable & Movable, origins: OriginSet](
     """A raising coroutine queued on an `Executor`, and the result — or the
     error — it will produce.
 
-    Immovable: the coroutine writes its result, error, and completion flag
+    Immovable: the coroutine writes its result, error, and completion hook
     through pointers into this struct.
     """
 
     var _executor: ArcPointer[_ExecutorInner]
     var _handle: AnyCoroutine
-    var _completed: _COMPLETED_FLAG_TYPE
+    var _hook: _CompletionHook
     var _result: Self.type
     var _error: Error
 
@@ -31,20 +33,23 @@ struct RaisingTask[type: Deinitable & Movable, origins: OriginSet](
         out self,
         var handle: RaisingCoroutine[Self.type, Self.origins],
         var executor: ArcPointer[_ExecutorInner],
+        callback: Optional[TaskCallback] = None,
     ):
         """Initialize a task with a raising coroutine.
 
         Takes ownership of the provided coroutine and points it at this
-        task's result slot, error slot, and completion flag.
+        task's result slot, error slot, and completion hook.
 
         Args:
             handle: The raising coroutine to execute as a task. Ownership is
                 transferred.
             executor: The executor running the coroutine. Ownership is
                 transferred.
+            callback: Called once the coroutine completes, before the task
+                reads as completed. None by default.
         """
         self._executor = executor^
-        self._completed = _COMPLETED_FLAG_TYPE(0)
+        self._hook = _CompletionHook(callback)
 
         # Neither slot is actually written yet — the coroutine writes
         # whichever one it completes with, through the pointers handed to
@@ -60,9 +65,9 @@ struct RaisingTask[type: Deinitable & Movable, origins: OriginSet](
             Pointer(to=self._result), Pointer(to=self._error)
         )
 
-        _install_completion_callback(
-            handle._get_ctx[_CoroutineContext[_CompletedFlagPointer]](),
-            _completed_flag_ptr(self._completed),
+        _install_completion_hook(
+            handle._get_ctx[_CoroutineContext[_CompletionHookPointer]](),
+            _completion_hook_ptr(self._hook),
         )
 
         self._handle = handle^._take_handle()
@@ -99,7 +104,7 @@ struct RaisingTask[type: Deinitable & Movable, origins: OriginSet](
         A task that has not started, or that is parked on an `await`, reads
         as False; once True, the result or error is there.
         """
-        return self._completed.load() != 0
+        return self._hook.is_completed()
 
     def _has_error(self) -> Bool:
         """Return True if the completed coroutine raised rather than returned.
