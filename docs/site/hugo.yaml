@@ -1,6 +1,6 @@
-baseURL: https://Mr-Leshiy.github.io/mojo-gpu-async/
+baseURL: https://Mr-Leshiy.github.io/warp/
 languageCode: en-us
-title: gpu-async
+title: warp
 disablePathToLower: true
 
 # The hextra theme's RSS template references `.Site.Author.email`, removed in

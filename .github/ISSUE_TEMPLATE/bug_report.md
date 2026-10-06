@@ -1,6 +1,6 @@
 ---
 name: Bug Report
-about: Report a bug or issue with mojo-gpu-async
+about: Report a bug or issue with warp
 title: ''
 labels: 'bug'
 assignees: ''
