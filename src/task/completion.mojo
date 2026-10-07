@@ -1,13 +1,43 @@
 from std.atomic import Atomic
 from std.collections.optional import Optional
 
-from ..context import _CoroutineContext
+from .context import _CoroutineContext
 
 comptime _COMPLETED_FLAG_TYPE = Atomic[Scalar[DType.uint8]]
 """Flag type of a task's completion flag: `Atomic` cannot store a `Bool`'s `i1`."""
 
-comptime TaskCallback = def() thin -> None
-"""A function a task calls once its coroutine completes."""
+comptime CompletionCallbackPayload = Int
+"""The value a task hands its callback: whatever state the callback needs,
+e.g. an address it casts back to a pointer."""
+
+comptime CompletionCallbackFn = def(Optional[CompletionCallbackPayload]) thin -> None
+"""The function a `CompletionCallback` calls with its payload."""
+
+
+struct CompletionCallback:
+    """A function a task calls once its coroutine completes, together with
+    the payload it's called with."""
+
+    var function: CompletionCallbackFn
+    var payload: Optional[CompletionCallbackPayload]
+
+    def __init__(
+        out self,
+        function: CompletionCallbackFn,
+        payload: Optional[CompletionCallbackPayload] = None,
+    ):
+        """Initialize a callback.
+
+        Args:
+            function: The function to call.
+            payload: Passed to `function` when it's called.
+        """
+        self.function = function
+        self.payload = payload
+
+    def __call__(self):
+        """Call `function` with `payload`."""
+        self.function(self.payload)
 
 
 struct _CompletionHook(Movable where False):
@@ -19,11 +49,11 @@ struct _CompletionHook(Movable where False):
     """
 
     var completed: _COMPLETED_FLAG_TYPE
-    var callback: Optional[TaskCallback]
+    var callback: Optional[CompletionCallback]
 
-    def __init__(out self, callback: Optional[TaskCallback]):
+    def __init__(out self, var callback: Optional[CompletionCallback]):
         self.completed = _COMPLETED_FLAG_TYPE(0)
-        self.callback = callback
+        self.callback = callback^
 
     def is_completed(self) -> Bool:
         return self.completed.load() != 0

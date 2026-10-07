@@ -2,10 +2,10 @@ from std.builtin._coroutine import AnyCoroutine, RaisingCoroutine
 from std.collections.optional import Optional
 from std.memory import ArcPointer, forget_deinit
 
-from ..context import _CoroutineContext
 from ..executor import _ExecutorInner
-from .common import (
-    TaskCallback,
+from .context import _CoroutineContext
+from .completion import (
+    CompletionCallback,
     _CompletionHook,
     _CompletionHookPointer,
     _completion_hook_ptr,
@@ -33,7 +33,7 @@ struct RaisingTask[type: Deinitable & Movable, origins: OriginSet](
         out self,
         var handle: RaisingCoroutine[Self.type, Self.origins],
         var executor: ArcPointer[_ExecutorInner],
-        callback: Optional[TaskCallback] = None,
+        var callback: Optional[CompletionCallback] = None,
     ):
         """Initialize a task with a raising coroutine.
 
@@ -49,7 +49,7 @@ struct RaisingTask[type: Deinitable & Movable, origins: OriginSet](
                 reads as completed. None by default.
         """
         self._executor = executor^
-        self._hook = _CompletionHook(callback)
+        self._hook = _CompletionHook(callback^)
 
         # Neither slot is actually written yet — the coroutine writes
         # whichever one it completes with, through the pointers handed to

@@ -54,7 +54,7 @@ struct Executor(Copyable):
             handle: The coroutine to run. Ownership is transferred.
         """
         task = Task(handle^, self._inner.copy())
-        self._inner[].add(task._handle, False)
+        self._inner[].add(task._handle)
 
     def add[
         type: Deinitable & Movable, origins: OriginSet
@@ -72,13 +72,10 @@ struct Executor(Copyable):
             handle: The raising coroutine to run. Ownership is transferred.
         """
         task = RaisingTask(handle^, self._inner.copy())
-        self._inner[].add(task._handle, False)
+        self._inner[].add(task._handle)
 
     def add(self, handle: AnyCoroutine):
         """Queue a bare coroutine handle, without a task tracking it.
-
-        Meant for a coroutine re-queuing itself from a suspend body, e.g.
-        one passed to `_suspend_async`.
 
         Note:
             A suspend body that only calls this is straight-line code, which
@@ -103,7 +100,7 @@ struct Executor(Copyable):
         Args:
             handle: The coroutine to resume. The caller keeps ownership of it.
         """
-        self._inner[].add(handle, False)
+        self._inner[].add(handle)
 
     def wait(self) raises:
         """Run queued tasks until all have completed, then sync the device."""
@@ -129,6 +126,8 @@ struct _ExecutorInner:
     # (Analysis by Claude)
     var _q: OwnedPointer[Deque[AnyCoroutine]]
 
+    var _has_gpu_sync_coro: OwnedPointer[Bool]
+
     def __init__(out self, ctx: DeviceContext):
         """Initialize the shared state with an empty queue.
 
@@ -137,6 +136,7 @@ struct _ExecutorInner:
         """
         self._ctx = ctx
         self._q = OwnedPointer(Deque[AnyCoroutine]())
+        self._has_gpu_sync_coro = OwnedPointer(False)
 
     def __deinit__(deinit self):
         """Destroy every coroutine still queued."""
@@ -147,17 +147,11 @@ struct _ExecutorInner:
         except:
             pass
 
-    def add(mut self, handle: AnyCoroutine, is_need_sync: Bool):
+    def add(mut self, handle: AnyCoroutine):
         """Queue a coroutine: freshly created, or resuming after a yield.
 
         Args:
             handle: The coroutine to run. The caller keeps ownership of it.
-            is_need_sync: True if `handle` is resuming after
-                `Context.synchronize()` suspended it, so it may depend on
-                GPU work it queued right before yielding and needs the
-                device synced before it runs again. False for a freshly
-                created task, which hasn't launched anything yet and so
-                never needs a sync of its own.
         """
         self._q[].append(handle)
 
