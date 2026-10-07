@@ -13,9 +13,11 @@ from .completion import (
 )
 
 
-struct RaisingTask[type: Deinitable & Movable, origins: OriginSet](
-    Movable where False
-):
+struct RaisingTask[
+    type: Deinitable & Movable,
+    origins: OriginSet,
+    CallbackPayload: Movable & Deinitable = NoneType,
+](Movable where False):
     """A raising coroutine queued on an `Executor`, and the result — or the
     error — it will produce.
 
@@ -25,7 +27,7 @@ struct RaisingTask[type: Deinitable & Movable, origins: OriginSet](
 
     var _executor: ArcPointer[_ExecutorInner]
     var _handle: AnyCoroutine
-    var _hook: _CompletionHook
+    var _hook: _CompletionHook[Self.CallbackPayload]
     var _result: Self.type
     var _error: Error
 
@@ -33,7 +35,7 @@ struct RaisingTask[type: Deinitable & Movable, origins: OriginSet](
         out self,
         var handle: RaisingCoroutine[Self.type, Self.origins],
         var executor: ArcPointer[_ExecutorInner],
-        var callback: Optional[CompletionCallback] = None,
+        var callback: Optional[CompletionCallback[Self.CallbackPayload]] = None,
     ):
         """Initialize a task with a raising coroutine.
 
@@ -66,7 +68,9 @@ struct RaisingTask[type: Deinitable & Movable, origins: OriginSet](
         )
 
         _install_completion_hook(
-            handle._get_ctx[_CoroutineContext[_CompletionHookPointer]](),
+            handle._get_ctx[
+                _CoroutineContext[_CompletionHookPointer[Self.CallbackPayload]]
+            ](),
             _completion_hook_ptr(self._hook),
         )
 

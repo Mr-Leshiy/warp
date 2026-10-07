@@ -5,5 +5,4 @@ from .raising import RaisingTask
 from .completion import (
     CompletionCallback,
     CompletionCallbackFn,
-    CompletionCallbackPayload,
 )
