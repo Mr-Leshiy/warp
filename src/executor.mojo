@@ -129,19 +129,6 @@ struct _ExecutorInner:
     # (Analysis by Claude)
     var _q: OwnedPointer[Deque[AnyCoroutine]]
 
-    # How many pops, from the front of `_q`, until we reach the first
-    # coroutine that's resuming after a `Context.synchronize()` yield. `0`
-    # means none is currently queued.
-    #
-    # A device sync is a global barrier, so firing it once, right before
-    # that first tracked pop, is enough to cover every other "resuming after
-    # a yield" coroutine queued behind it too — their GPU work was launched
-    # even earlier in real time, so the same sync flushes it as well. That's
-    # why `add` only sets this when it's `0`: anything that yields while a
-    # sync is already pending rides it for free instead of scheduling a
-    # redundant one.
-    var _sync_counter: OwnedPointer[Int]
-
     def __init__(out self, ctx: DeviceContext):
         """Initialize the shared state with an empty queue.
 
@@ -150,7 +137,6 @@ struct _ExecutorInner:
         """
         self._ctx = ctx
         self._q = OwnedPointer(Deque[AnyCoroutine]())
-        self._sync_counter = OwnedPointer(0)
 
     def __deinit__(deinit self):
         """Destroy every coroutine still queued."""
@@ -174,13 +160,6 @@ struct _ExecutorInner:
                 never needs a sync of its own.
         """
         self._q[].append(handle)
-        # Only the *first* pending "needs sync" coroutine claims the
-        # counter — see the field comment above. Its value is `handle`'s
-        # 1-indexed position in the queue once appended below (`len(_q)`
-        # items already ahead of it, plus itself); `wait_until` counts pops
-        # down to that exact position before resuming it.
-        if is_need_sync and self._sync_counter[] == 0:
-            self._sync_counter[] = len(self._q[])
 
     def wait(mut self) raises:
         """Run queued coroutines until all have completed."""
@@ -191,6 +170,7 @@ struct _ExecutorInner:
 
         self.wait_until[never]()
 
+    @no_inline
     def wait_until[predicate: def() thin capturing -> Bool](mut self) raises:
         """Run queued coroutines until `predicate` holds or the queue empties.
 
@@ -201,14 +181,4 @@ struct _ExecutorInner:
 
         while not predicate() and len(self._q[]) > 0:
             var handle = self._q[].popleft()
-
-            # `handle` is the tracked "needs sync" coroutine exactly when
-            # the countdown reaches 1: sync now, before resuming it — not
-            # before any of the fresh/no-op coroutines popped earlier.
-            if self._sync_counter[] == 1:
-                self._ctx.synchronize()
-
-            if self._sync_counter[] > 0:
-                self._sync_counter[] -= 1
-
             _coro_resume_fn(handle)
