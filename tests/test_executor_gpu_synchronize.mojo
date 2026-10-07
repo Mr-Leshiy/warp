@@ -88,6 +88,8 @@ def test_synchronize_completes_a_real_device_round_trip() raises:
         var t = executor.add(square(context, input))
         assert_equal(t^.wait(), [1, 4, 9, 16, 25, 36, 49, 64])
 
+        assert_equal(executor._inner[]._has_sync_coro[], False)
+
 
 def test_synchronize_scales_to_many_concurrent_gpu_tasks() raises:
     with DeviceContext() as ctx:
@@ -142,6 +144,8 @@ def test_synchronize_scales_to_many_concurrent_gpu_tasks() raises:
         assert_equal(t14^.wait(), expected)
         assert_equal(t15^.wait(), expected)
         assert_equal(t16^.wait(), expected)
+
+        assert_equal(executor._inner[]._has_sync_coro[], False)
 
 
 def main() raises:

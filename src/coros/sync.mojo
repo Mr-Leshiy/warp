@@ -11,8 +11,6 @@ def _spawn_synchronize_coro(executor: ArcPointer[_ExecutorInner]):
 
     def _completion_callback(executor: ArcPointer[_ExecutorInner]):
         executor[]._has_sync_coro[] = False
-        print("spawn synchronize coro completion callback", executor[]._has_sync_coro[])
-
 
     if not executor[]._has_sync_coro[]:
         executor[]._has_sync_coro[] = True
