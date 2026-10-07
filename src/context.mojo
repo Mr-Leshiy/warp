@@ -10,6 +10,7 @@ from std.collections import Deque
 from std.memory import ArcPointer
 
 from .executor import _ExecutorInner
+from .coros import _spawn_synchronize_coro
 
 
 struct Context(Movable):
@@ -47,8 +48,8 @@ struct Context(Movable):
         """
 
         def body(hdl: AnyCoroutine) {self}:
-            # is_need_sync=True: `hdl` launched GPU work right before this
-            # yield, so it must not resume until the device has synced.
+            _spawn_synchronize_coro(self._executor)
+
             self._executor[].add(hdl)
 
         _suspend_async(body)

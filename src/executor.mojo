@@ -126,7 +126,7 @@ struct _ExecutorInner:
     # (Analysis by Claude)
     var _q: OwnedPointer[Deque[AnyCoroutine]]
 
-    var _has_gpu_sync_coro: OwnedPointer[Bool]
+    var _has_sync_coro: OwnedPointer[Bool]
 
     def __init__(out self, ctx: DeviceContext):
         """Initialize the shared state with an empty queue.
@@ -136,7 +136,7 @@ struct _ExecutorInner:
         """
         self._ctx = ctx
         self._q = OwnedPointer(Deque[AnyCoroutine]())
-        self._has_gpu_sync_coro = OwnedPointer(False)
+        self._has_sync_coro = OwnedPointer(False)
 
     def __deinit__(deinit self):
         """Destroy every coroutine still queued."""
