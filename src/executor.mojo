@@ -54,7 +54,7 @@ struct Executor(Copyable):
             handle: The coroutine to run. Ownership is transferred.
         """
         task = Task(handle^, self._inner.copy())
-        self._inner[].add(task._handle)
+        self._inner[].add(task.handle())
 
     def add[
         type: Deinitable & Movable, origins: OriginSet
@@ -72,7 +72,7 @@ struct Executor(Copyable):
             handle: The raising coroutine to run. Ownership is transferred.
         """
         task = RaisingTask(handle^, self._inner.copy())
-        self._inner[].add(task._handle)
+        self._inner[].add(task.handle())
 
     def add(self, handle: AnyCoroutine):
         """Queue a bare coroutine handle, without a task tracking it.
@@ -165,7 +165,8 @@ struct _ExecutorInner:
             return False
 
         self.wait_until[never]()
-
+    
+    # TODO: it must not raise any error
     @no_inline
     def wait_until[predicate: def() thin capturing -> Bool](mut self) raises:
         """Run queued coroutines until `predicate` holds or the queue empties.

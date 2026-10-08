@@ -3,14 +3,8 @@ from std.collections.optional import Optional
 from std.memory import ArcPointer
 
 from ..executor import _ExecutorInner
-from .context import _CoroutineContext
-from .completion import (
-    CompletionCallback,
-    _CompletionHook,
-    _CompletionHookPointer,
-    _completion_hook_ptr,
-    _install_completion_hook,
-)
+from .completion import CompletionCallback
+from .state import _TaskState
 
 
 struct Task[
@@ -24,10 +18,7 @@ struct Task[
     pointers into this struct.
     """
 
-    var _executor: ArcPointer[_ExecutorInner]
-    var _handle: AnyCoroutine
-    var _hook: _CompletionHook[Self.CallbackPayload]
-    var _result: Self.type
+    var _state: _TaskState[Self.type, Self.origins, False, Self.CallbackPayload]
 
     def __init__(
         out self,
@@ -48,39 +39,16 @@ struct Task[
             callback: Called once the coroutine completes, before the task
                 reads as completed. None by default.
         """
-        self._executor = executor^
-        self._hook = _CompletionHook(callback^)
-
-        # `_result` isn't actually written yet — the coroutine writes it,
-        # through the pointer handed to `_set_result_slot` below — but every
-        # field must be initialized by the end of `__init__`, so this stands
-        # in until then.
-        __mlir_op.`lit.ownership.mark_initialized`(
-            __get_mvalue_as_litref(self._result)
-        )
-        handle._set_result_slot(Pointer(to=self._result))
-
-        _install_completion_hook(
-            handle._get_ctx[
-                _CoroutineContext[_CompletionHookPointer[Self.CallbackPayload]]
-            ](),
-            _completion_hook_ptr(self._hook),
-        )
-
-        self._handle = handle^._take_handle()
+        self._state = _TaskState[
+            Self.type, Self.origins, False, Self.CallbackPayload
+        ](handle^, executor^, callback^)
 
     def wait(deinit self) raises -> Self.type:
         """Run the executor until this task completes, then take its result.
 
         Consumes the task: the flag and the result slot it owns die with it.
         """
-
-        @__parameter
-        def completed() -> Bool:
-            return self.is_completed()
-
-        self._executor[].wait_until[completed]()
-        return self._result^
+        return self._state^.wait()
 
     def is_completed(self) -> Bool:
         """Return True once the coroutine has run to completion.
@@ -88,4 +56,12 @@ struct Task[
         A task that has not started, or that is parked on an `await`, reads as
         False; once True, the result is there.
         """
-        return self._hook.is_completed()
+        return self._state.is_completed()
+
+    def handle(self) -> AnyCoroutine:
+        """Return the handle of the coroutine this task runs.
+
+        Returns:
+            The coroutine handle, for queueing on an executor.
+        """
+        return self._state._handle

@@ -33,4 +33,4 @@ def _spawn_synchronize_coro(executor: ArcPointer[_ExecutorInner]):
                 _completion_callback, executor.copy()
             ),
         )
-        executor[].add(sync_coro._handle)
+        executor[].add(sync_coro.handle())
