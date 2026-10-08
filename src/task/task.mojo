@@ -2,10 +2,10 @@ from std.builtin._coroutine import AnyCoroutine, Coroutine
 from std.collections.optional import Optional
 from std.memory import ArcPointer
 
-from ..context import _CoroutineContext
 from ..executor import _ExecutorInner
-from .common import (
-    TaskCallback,
+from .context import _CoroutineContext
+from .completion import (
+    CompletionCallback,
     _CompletionHook,
     _CompletionHookPointer,
     _completion_hook_ptr,
@@ -13,9 +13,11 @@ from .common import (
 )
 
 
-struct Task[type: Deinitable & Movable, origins: OriginSet](
-    Movable where False
-):
+struct Task[
+    type: Deinitable & Movable,
+    origins: OriginSet,
+    CallbackPayload: Movable & Deinitable = NoneType,
+](Movable where False):
     """A coroutine queued on an `Executor`, and the result it will produce.
 
     Immovable: the coroutine writes its result and completion hook through
@@ -24,14 +26,14 @@ struct Task[type: Deinitable & Movable, origins: OriginSet](
 
     var _executor: ArcPointer[_ExecutorInner]
     var _handle: AnyCoroutine
-    var _hook: _CompletionHook
+    var _hook: _CompletionHook[Self.CallbackPayload]
     var _result: Self.type
 
     def __init__(
         out self,
         var handle: Coroutine[Self.type, Self.origins],
         var executor: ArcPointer[_ExecutorInner],
-        callback: Optional[TaskCallback] = None,
+        var callback: Optional[CompletionCallback[Self.CallbackPayload]] = None,
     ):
         """Initialize a task with a coroutine.
 
@@ -47,7 +49,7 @@ struct Task[type: Deinitable & Movable, origins: OriginSet](
                 reads as completed. None by default.
         """
         self._executor = executor^
-        self._hook = _CompletionHook(callback)
+        self._hook = _CompletionHook(callback^)
 
         # `_result` isn't actually written yet — the coroutine writes it,
         # through the pointer handed to `_set_result_slot` below — but every
@@ -59,7 +61,9 @@ struct Task[type: Deinitable & Movable, origins: OriginSet](
         handle._set_result_slot(Pointer(to=self._result))
 
         _install_completion_hook(
-            handle._get_ctx[_CoroutineContext[_CompletionHookPointer]](),
+            handle._get_ctx[
+                _CoroutineContext[_CompletionHookPointer[Self.CallbackPayload]]
+            ](),
             _completion_hook_ptr(self._hook),
         )
 

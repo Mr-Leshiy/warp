@@ -54,7 +54,7 @@ struct Executor(Copyable):
             handle: The coroutine to run. Ownership is transferred.
         """
         task = Task(handle^, self._inner.copy())
-        self._inner[].add(task._handle, False)
+        self._inner[].add(task._handle)
 
     def add[
         type: Deinitable & Movable, origins: OriginSet
@@ -72,13 +72,10 @@ struct Executor(Copyable):
             handle: The raising coroutine to run. Ownership is transferred.
         """
         task = RaisingTask(handle^, self._inner.copy())
-        self._inner[].add(task._handle, False)
+        self._inner[].add(task._handle)
 
     def add(self, handle: AnyCoroutine):
         """Queue a bare coroutine handle, without a task tracking it.
-
-        Meant for a coroutine re-queuing itself from a suspend body, e.g.
-        one passed to `_suspend_async`.
 
         Note:
             A suspend body that only calls this is straight-line code, which
@@ -103,7 +100,7 @@ struct Executor(Copyable):
         Args:
             handle: The coroutine to resume. The caller keeps ownership of it.
         """
-        self._inner[].add(handle, False)
+        self._inner[].add(handle)
 
     def wait(self) raises:
         """Run queued tasks until all have completed, then sync the device."""
@@ -129,18 +126,7 @@ struct _ExecutorInner:
     # (Analysis by Claude)
     var _q: OwnedPointer[Deque[AnyCoroutine]]
 
-    # How many pops, from the front of `_q`, until we reach the first
-    # coroutine that's resuming after a `Context.synchronize()` yield. `0`
-    # means none is currently queued.
-    #
-    # A device sync is a global barrier, so firing it once, right before
-    # that first tracked pop, is enough to cover every other "resuming after
-    # a yield" coroutine queued behind it too — their GPU work was launched
-    # even earlier in real time, so the same sync flushes it as well. That's
-    # why `add` only sets this when it's `0`: anything that yields while a
-    # sync is already pending rides it for free instead of scheduling a
-    # redundant one.
-    var _sync_counter: OwnedPointer[Int]
+    var _has_sync_coro: OwnedPointer[Bool]
 
     def __init__(out self, ctx: DeviceContext):
         """Initialize the shared state with an empty queue.
@@ -150,7 +136,7 @@ struct _ExecutorInner:
         """
         self._ctx = ctx
         self._q = OwnedPointer(Deque[AnyCoroutine]())
-        self._sync_counter = OwnedPointer(0)
+        self._has_sync_coro = OwnedPointer(False)
 
     def __deinit__(deinit self):
         """Destroy every coroutine still queued."""
@@ -161,26 +147,13 @@ struct _ExecutorInner:
         except:
             pass
 
-    def add(mut self, handle: AnyCoroutine, is_need_sync: Bool):
+    def add(mut self, handle: AnyCoroutine):
         """Queue a coroutine: freshly created, or resuming after a yield.
 
         Args:
             handle: The coroutine to run. The caller keeps ownership of it.
-            is_need_sync: True if `handle` is resuming after
-                `Context.synchronize()` suspended it, so it may depend on
-                GPU work it queued right before yielding and needs the
-                device synced before it runs again. False for a freshly
-                created task, which hasn't launched anything yet and so
-                never needs a sync of its own.
         """
         self._q[].append(handle)
-        # Only the *first* pending "needs sync" coroutine claims the
-        # counter — see the field comment above. Its value is `handle`'s
-        # 1-indexed position in the queue once appended below (`len(_q)`
-        # items already ahead of it, plus itself); `wait_until` counts pops
-        # down to that exact position before resuming it.
-        if is_need_sync and self._sync_counter[] == 0:
-            self._sync_counter[] = len(self._q[])
 
     def wait(mut self) raises:
         """Run queued coroutines until all have completed."""
@@ -191,6 +164,7 @@ struct _ExecutorInner:
 
         self.wait_until[never]()
 
+    @no_inline
     def wait_until[predicate: def() thin capturing -> Bool](mut self) raises:
         """Run queued coroutines until `predicate` holds or the queue empties.
 
@@ -201,14 +175,4 @@ struct _ExecutorInner:
 
         while not predicate() and len(self._q[]) > 0:
             var handle = self._q[].popleft()
-
-            # `handle` is the tracked "needs sync" coroutine exactly when
-            # the countdown reaches 1: sync now, before resuming it — not
-            # before any of the fresh/no-op coroutines popped earlier.
-            if self._sync_counter[] == 1:
-                self._ctx.synchronize()
-
-            if self._sync_counter[] > 0:
-                self._sync_counter[] -= 1
-
             _coro_resume_fn(handle)

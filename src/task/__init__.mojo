@@ -2,4 +2,7 @@
 
 from .task import Task
 from .raising import RaisingTask
-from .common import TaskCallback
+from .completion import (
+    CompletionCallback,
+    CompletionCallbackFn,
+)
