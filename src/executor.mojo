@@ -120,12 +120,14 @@ struct _ExecutorInner:
     # dropping the append. Behind a pointer the header lives outside that
     # borrow and both paths agree on it. Note that the queue is genuinely
     # shared-mutable across those two paths, so `OwnedPointer`'s uniqueness
-    # claim is a fiction the optimizer is free to act on. `_sync_counter`
+    # claim is a fiction the optimizer is free to act on. `_has_sync_coro`
     # below is read and written through the same two paths, for the same
     # reason, so it lives behind a pointer too.
     # (Analysis by Claude)
     var _q: OwnedPointer[Deque[AnyCoroutine]]
 
+    # Whether a device-sync coroutine is queued and not yet completed; keeps
+    # `_spawn_synchronize_coro` from queueing more than one at a time.
     var _has_sync_coro: OwnedPointer[Bool]
 
     def __init__(out self, ctx: DeviceContext):

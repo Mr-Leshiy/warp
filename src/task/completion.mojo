@@ -79,10 +79,17 @@ struct _CompletionHook[CallbackPayload: Movable & Deinitable](
         out self,
         var callback: Optional[CompletionCallback[Self.CallbackPayload]],
     ):
+        """Initialize a hook with the flag cleared.
+
+        Args:
+            callback: Run on completion, before the flag is set. Ownership is
+                transferred.
+        """
         self.completed = _COMPLETED_FLAG_TYPE(0)
         self.callback = callback^
 
     def is_completed(self) -> Bool:
+        """Return whether the coroutine has completed and its callback ran."""
         return self.completed.load() != 0
 
 

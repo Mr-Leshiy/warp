@@ -1,3 +1,5 @@
+"""The coroutine that synchronizes an executor's device for its tasks."""
+
 from std.memory import ArcPointer
 from max.gpu.host import DeviceContext
 
@@ -6,9 +8,18 @@ from ..task import RaisingTask, CompletionCallback
 
 
 def _spawn_synchronize_coro(executor: ArcPointer[_ExecutorInner]):
+    """Queue a coroutine that synchronizes the executor's device, unless one is
+    already pending, so concurrent `Context.synchronize` calls share one sync.
+
+    Args:
+        executor: The executor whose device to synchronize.
+    """
+
     async def _synchronize(mut ctx: DeviceContext) raises:
         ctx.synchronize()
 
+    # Clears the flag once the sync finishes, so the next sync request
+    # spawns a fresh coroutine.
     def _completion_callback(executor: ArcPointer[_ExecutorInner]):
         executor[]._has_sync_coro[] = False
 
