@@ -1,7 +1,7 @@
 from std.atomic import Atomic
 from std.collections.optional import Optional
 
-from .context import _CoroutineContext
+from .context import _CoroutineContextPtr
 
 comptime _COMPLETED_FLAG_TYPE = Atomic[Scalar[DType.uint8]]
 """Flag type of a task's completion flag: `Atomic` cannot store a `Bool`'s `i1`."""
@@ -62,16 +62,15 @@ struct CompletionCallback[CallbackPayload: Movable & Deinitable = NoneType](
         self.function(self.payload)
 
 
-struct _CompletionHook[CallbackPayload: Movable & Deinitable](
-    Movable where False
-):
+struct _CompletionHook[CallbackPayload: Movable & Deinitable](Movable):
     """What a task's coroutine runs on completion: an optional user callback,
     then raising the completed flag.
 
-    Lives in the task; the coroutine frame reaches it through the pointer
-    stored as its completion payload. Immovable for the same reason.
+    Lives on the heap, owned by a `_TaskHandle`.
     """
 
+    # Must stay the first field: `_TaskHandle` reads it without knowing
+    # `CallbackPayload`.
     var completed: _COMPLETED_FLAG_TYPE
     var callback: Optional[CompletionCallback[Self.CallbackPayload]]
 
@@ -88,42 +87,33 @@ struct _CompletionHook[CallbackPayload: Movable & Deinitable](
         self.completed = _COMPLETED_FLAG_TYPE(0)
         self.callback = callback^
 
+    # TODO: revise: this move only exists to place the hook on the heap;
+    # building it there in place would let `_CompletionHook` stay immovable.
+    def __init__(out self, *, deinit move: Self):
+        """Move a hook no coroutine points at yet.
+
+        Args:
+            move: The hook to move from.
+        """
+        self.completed = _COMPLETED_FLAG_TYPE(move.completed.load())
+        self.callback = move.callback^
+
     def is_completed(self) -> Bool:
         """Return whether the coroutine has completed and its callback ran."""
         return self.completed.load() != 0
 
 
-comptime _CompletionHookPointer[
-    CallbackPayload: Movable & Deinitable
-] = Pointer[_CompletionHook[CallbackPayload], MutUntrackedOrigin]
-"""Pointer to a task's completion hook, as the coroutine frame holds it."""
-
-comptime _CompletionContextPointer[
-    CallbackPayload: Movable & Deinitable
-] = Pointer[
-    _CoroutineContext[_CompletionHookPointer[CallbackPayload]],
-    MutUntrackedOrigin,
+comptime _CompletionHookPtr[CallbackPayload: Movable & Deinitable] = Pointer[
+    _CompletionHook[CallbackPayload], MutUntrackedOrigin
 ]
-"""Pointer to a task coroutine's context slot, holding its completion hook."""
-
-
-@always_inline
-def _completion_hook_ptr[
-    CallbackPayload: Movable & Deinitable
-](hook: _CompletionHook[CallbackPayload]) -> _CompletionHookPointer[
-    CallbackPayload
-]:
-    """Build the untracked pointer a coroutine frame uses to reach a hook."""
-    return _CompletionHookPointer[CallbackPayload](
-        unsafe_from_address=Int(Pointer(to=hook))
-    )
+"""Pointer to a task's completion hook, as the coroutine frame holds it."""
 
 
 def _install_completion_hook[
     CallbackPayload: Movable & Deinitable
 ](
-    ctx: _CompletionContextPointer[CallbackPayload],
-    hook: _CompletionHookPointer[CallbackPayload],
+    ctx: _CoroutineContextPtr[CallbackPayload],
+    hook: _CompletionHookPtr[CallbackPayload],
 ):
     """Install the completion hook in a task coroutine's frame.
 
@@ -137,7 +127,7 @@ def _install_completion_hook[
         hook: The hook to run once the coroutine completes.
     """
 
-    def _on_completion(hook: _CompletionHookPointer[CallbackPayload]):
+    def _on_completion(hook: _CompletionHookPtr[CallbackPayload]):
         # The callback runs first, so by the time the flag reads as set,
         # it has already finished.
         if hook[].callback:
