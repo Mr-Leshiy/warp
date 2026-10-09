@@ -34,33 +34,31 @@ struct _TaskHandle(Movable):
     var _hook_deinit: def(_ErasedCompletionHookPtr) thin -> None
     """Destroys and frees `_hook`; the one operation that needs its type."""
     var _owns_coroutine: Bool
-    """Whether dropping this handle destroys the coroutine and its hook."""
+    """False for a frame re-queued after a yield (see `suspended`)."""
 
-    # TODO: get rid of this unsafe hook-less variant. Look into how
-    # `_get_ctx` and the frame's context slot work, to find a way
-    # to queue only real task handles.
-    def __init__(out self, *, coro_handle: AnyCoroutine):
-        """Wrap just `coro_handle`: no completion hook, no completed flag, no
-        callback.
+    def __init__(out self, *, suspended: AnyCoroutine):
+        """Wrap a frame re-queued after a yield, without owning it.
 
-        Doesn't own the coroutine: dropping this handle doesn't destroy it,
-        and `is_completed` always reads False.
+        A yield hands the executor the frame that suspended: the task's own
+        coroutine or one it's awaiting. That frame already belongs to someone,
+        and its context slot is in use (the task's hook, or "resume my
+        parent"). So this installs no hook and never destroys the frame:
+        doing either would cut the task off from its hook, or destroy a frame
+        that's still queued, after which resuming it restarts it from the top.
 
         Args:
-            coro_handle: The suspended coroutine to resume.
+            suspended: The suspended frame to resume. Its owner keeps it.
         """
-        self._handle = coro_handle
+        self._handle = suspended
         self._hook = _ErasedCompletionHookPtr.unsafe_dangling()  # never read
-        self._hook_deinit = _no_hook_deinit
+        self._hook_deinit = _hook_deinit[NoneType]  # never called
         self._owns_coroutine = False
 
     def __init__[
-        type: Deinitable & Movable,
-        origins: OriginSet,
-        CallbackPayload: Movable & Deinitable,
+        CallbackPayload: Movable & Deinitable = NoneType,
     ](
         out self,
-        var coro: Coroutine[type, origins],
+        var coro_handle: AnyCoroutine,
         var callback: Optional[CompletionCallback[CallbackPayload]],
     ):
         """Take ownership of a coroutine and install its completion hook.
@@ -68,36 +66,11 @@ struct _TaskHandle(Movable):
         Its result slot must already be set (`_set_result_slot`).
 
         Args:
-            coro: The coroutine. Ownership is transferred.
+            coro_handle: The coroutine handle. Ownership is transferred.
             callback: Called once the coroutine completes, before the task
                 reads as completed. Ownership is transferred.
         """
-        self._handle = coro^._take_handle()
-        var hook = _allocate_completion_hook(self._handle, callback^)
-        self._hook = hook.unsafe_bitcast[NoneType]()
-        self._hook_deinit = _hook_deinit[CallbackPayload]
-        self._owns_coroutine = True
-
-    def __init__[
-        type: AnyType,
-        origins: OriginSet,
-        CallbackPayload: Movable & Deinitable,
-    ](
-        out self,
-        var coro: RaisingCoroutine[type, origins],
-        var callback: Optional[CompletionCallback[CallbackPayload]],
-    ):
-        """Take ownership of a raising coroutine and install its completion
-        hook.
-
-        Its result and error slots must already be set (`_set_result_slot`).
-
-        Args:
-            coro: The raising coroutine. Ownership is transferred.
-            callback: Called once the coroutine completes, before the task
-                reads as completed. Ownership is transferred.
-        """
-        self._handle = coro^._take_handle()
+        self._handle = coro_handle
         var hook = _allocate_completion_hook(self._handle, callback^)
         self._hook = hook.unsafe_bitcast[NoneType]()
         self._hook_deinit = _hook_deinit[CallbackPayload]
@@ -125,7 +98,6 @@ struct _TaskHandle(Movable):
         callback, if any, has run."""
         if not self._owns_coroutine:
             return False
-        # `completed` is the hook's first field, whatever its payload type.
         return self._hook.unsafe_bitcast[_COMPLETED_FLAG_TYPE]()[].load() != 0
 
 
