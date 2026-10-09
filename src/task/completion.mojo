@@ -1,7 +1,10 @@
 from std.atomic import Atomic
 from std.collections.optional import Optional
+from std.memory.owned_pointer import OwnedPointer
 
-from .context import _CoroutineContextPtr
+from std.builtin._coroutine import AnyCoroutine
+
+from .context import _CoroutineContextCallbackFn, _get_ctx
 
 comptime _COMPLETED_FLAG_TYPE = Atomic[Scalar[DType.uint8]]
 """Flag type of a task's completion flag: `Atomic` cannot store a `Bool`'s `i1`."""
@@ -10,6 +13,12 @@ comptime CompletionCallbackFn[CallbackPayload: Movable & Deinitable] = def(
     CallbackPayload
 ) thin -> None
 """The function a `CompletionCallback` calls with its payload."""
+
+
+comptime _CompletionHookPtr[CallbackPayload: Movable & Deinitable] = Pointer[
+    _CompletionHook[CallbackPayload], MutUntrackedOrigin
+]
+"""Pointer to a task's completion hook, as the coroutine frame holds it."""
 
 
 struct CompletionCallback[CallbackPayload: Movable & Deinitable = NoneType](
@@ -87,44 +96,31 @@ struct _CompletionHook[CallbackPayload: Movable & Deinitable](Movable):
         self.completed = _COMPLETED_FLAG_TYPE(0)
         self.callback = callback^
 
-    # TODO: revise: this move only exists to place the hook on the heap;
-    # building it there in place would let `_CompletionHook` stay immovable.
-    def __init__(out self, *, deinit move: Self):
-        """Move a hook no coroutine points at yet.
-
-        Args:
-            move: The hook to move from.
-        """
-        self.completed = _COMPLETED_FLAG_TYPE(move.completed.load())
-        self.callback = move.callback^
-
     def is_completed(self) -> Bool:
         """Return whether the coroutine has completed and its callback ran."""
         return self.completed.load() != 0
 
 
-comptime _CompletionHookPtr[CallbackPayload: Movable & Deinitable] = Pointer[
-    _CompletionHook[CallbackPayload], MutUntrackedOrigin
-]
-"""Pointer to a task's completion hook, as the coroutine frame holds it."""
-
-
-def _install_completion_hook[
+def _allocate_completion_hook[
     CallbackPayload: Movable & Deinitable
 ](
-    ctx: _CoroutineContextPtr[CallbackPayload],
-    hook: _CompletionHookPtr[CallbackPayload],
-):
-    """Install the completion hook in a task coroutine's frame.
+    handle: AnyCoroutine,
+    var callback: Optional[CompletionCallback[CallbackPayload]],
+) -> _CompletionHookPtr[CallbackPayload]:
+    """Allocate a completion hook on the heap and install it in a task
+    coroutine's frame.
 
-    Takes the coroutine's context slot directly (from `_get_ctx`) rather than
-    the coroutine itself, so it works for a `Task`'s `Coroutine` or a
-    `RaisingTask`'s `RaisingCoroutine` alike — both produce the same
-    `_CoroutineContext` shape.
+    Takes the raw coroutine handle, so it works for a `Task`'s `Coroutine` or
+    a `RaisingTask`'s `RaisingCoroutine` alike.
 
     Args:
-        ctx: The coroutine's context slot.
-        hook: The hook to run once the coroutine completes.
+        handle: The coroutine.
+        callback: Called once the coroutine completes, before the hook reads
+            as completed. Ownership is transferred.
+
+    Returns:
+        The hook. The caller owns it: destroy and free it once the coroutine
+        is done with it.
     """
 
     def _on_completion(hook: _CompletionHookPtr[CallbackPayload]):
@@ -134,5 +130,13 @@ def _install_completion_hook[
             hook[].callback.value()()
         hook[].completed.store(1)
 
+    var hook = (
+        OwnedPointer(_CompletionHook(callback^))
+        .unsafe_take_allocation()
+        .unsafe_leak()
+    )
+
+    var ctx = _get_ctx[_CompletionHookPtr[CallbackPayload]](handle)
     ctx[].callback = _on_completion
     ctx[].payload = hook
+    return hook

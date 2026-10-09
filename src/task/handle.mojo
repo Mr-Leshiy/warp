@@ -8,15 +8,13 @@ from std.builtin._coroutine import (
     _coro_destroy_fn,
 )
 from std.collections.optional import Optional
-from std.memory.alloc import unsafe_alloc
 
-from .context import _CoroutineContextPtr, _CoroutineContext
 from .completion import (
     CompletionCallback,
     _COMPLETED_FLAG_TYPE,
     _CompletionHookPtr,
     _CompletionHook,
-    _install_completion_hook,
+    _allocate_completion_hook,
 )
 
 comptime _ErasedCompletionHookPtr = MutOpaquePointer[MutUntrackedOrigin]
@@ -39,7 +37,7 @@ struct _TaskHandle(Movable):
     """Whether dropping this handle destroys the coroutine and its hook."""
 
     # TODO: get rid of this unsafe hook-less variant. Look into how
-    # `Coroutine._get_ctx` and the frame's context slot work, to find a way
+    # `_get_ctx` and the frame's context slot work, to find a way
     # to queue only real task handles.
     def __init__(out self, *, coro_handle: AnyCoroutine):
         """Wrap just `coro_handle`: no completion hook, no completed flag, no
@@ -74,13 +72,8 @@ struct _TaskHandle(Movable):
             callback: Called once the coroutine completes, before the task
                 reads as completed. Ownership is transferred.
         """
-        var hook = _new_completion_hook(
-            coro._get_ctx[
-                _CoroutineContext[_CompletionHookPtr[CallbackPayload]]
-            ](),
-            callback^,
-        )
         self._handle = coro^._take_handle()
+        var hook = _allocate_completion_hook(self._handle, callback^)
         self._hook = hook.unsafe_bitcast[NoneType]()
         self._hook_deinit = _hook_deinit[CallbackPayload]
         self._owns_coroutine = True
@@ -104,13 +97,8 @@ struct _TaskHandle(Movable):
             callback: Called once the coroutine completes, before the task
                 reads as completed. Ownership is transferred.
         """
-        var hook = _new_completion_hook(
-            coro._get_ctx[
-                _CoroutineContext[_CompletionHookPtr[CallbackPayload]]
-            ](),
-            callback^,
-        )
         self._handle = coro^._take_handle()
+        var hook = _allocate_completion_hook(self._handle, callback^)
         self._hook = hook.unsafe_bitcast[NoneType]()
         self._hook_deinit = _hook_deinit[CallbackPayload]
         self._owns_coroutine = True
@@ -139,22 +127,6 @@ struct _TaskHandle(Movable):
             return False
         # `completed` is the hook's first field, whatever its payload type.
         return self._hook.unsafe_bitcast[_COMPLETED_FLAG_TYPE]()[].load() != 0
-
-
-def _new_completion_hook[
-    CallbackPayload: Movable & Deinitable
-](
-    ctx: _CoroutineContextPtr[CallbackPayload],
-    var callback: Optional[CompletionCallback[CallbackPayload]],
-) -> _CompletionHookPtr[CallbackPayload]:
-    """Allocate a completion hook on the heap and install it in the
-    coroutine whose context slot `ctx` is."""
-    var hook = unsafe_alloc[_CompletionHook[CallbackPayload]](1)
-    # TODO: revise: this move only exists to place the hook on the heap;
-    # building it there in place would let `_CompletionHook` stay immovable.
-    hook.unsafe_write(_CompletionHook(callback^))
-    _install_completion_hook(ctx, hook)
-    return hook
 
 
 def _hook_deinit[
