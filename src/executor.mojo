@@ -99,7 +99,7 @@ struct Executor(Copyable):
         Args:
             handle: The coroutine to resume. The caller keeps ownership of it.
         """
-        self._inner[].add(handle)
+        self._inner[].add(ArcPointer(_TaskHandle(suspended=handle)))
 
     def wait(self) raises:
         """Run queued tasks until all have completed, then sync the device."""
@@ -147,14 +147,6 @@ struct _ExecutorInner:
                 the coroutine is resumed.
         """
         self._q[].append(handle^)
-
-    def add(mut self, handle: AnyCoroutine):
-        """Queue a coroutine resuming after a yield.
-
-        Args:
-            handle: The coroutine to run. The caller keeps ownership of it.
-        """
-        self.add(ArcPointer(_TaskHandle(coro_handle=handle)))
 
     def wait(mut self) raises:
         """Run queued coroutines until all have completed."""

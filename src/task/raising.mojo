@@ -26,7 +26,7 @@ struct RaisingTask[
 
     def __init__(
         out self,
-        var handle: RaisingCoroutine[Self.type, Self.origins],
+        var coro: RaisingCoroutine[Self.type, Self.origins],
         var executor: ArcPointer[_ExecutorInner],
         var callback: Optional[CompletionCallback[Self.CallbackPayload]] = None,
     ):
@@ -36,7 +36,7 @@ struct RaisingTask[
         task's result slot, error slot, and completion hook.
 
         Args:
-            handle: The raising coroutine to execute as a task. Ownership is
+            coro: The raising coroutine to execute as a task. Ownership is
                 transferred.
             executor: The executor running the coroutine. Ownership is
                 transferred.
@@ -55,11 +55,9 @@ struct RaisingTask[
         __mlir_op.`lit.ownership.mark_initialized`(
             __get_mvalue_as_litref(self._error)
         )
-        handle._set_result_slot(
-            Pointer(to=self._result), Pointer(to=self._error)
-        )
+        coro._set_result_slot(Pointer(to=self._result), Pointer(to=self._error))
 
-        self._handle = ArcPointer(_TaskHandle(handle^, callback^))
+        self._handle = ArcPointer(_TaskHandle(coro^._take_handle(), callback^))
 
     def wait(deinit self) raises -> Self.type:
         """Run the executor until this task completes, then take its result.

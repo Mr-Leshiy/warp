@@ -10,6 +10,7 @@ from std.collections import Deque
 from std.memory import ArcPointer
 
 from .executor import _ExecutorInner
+from .task.handle import _TaskHandle
 from .coros import _spawn_synchronize_coro
 
 
@@ -50,7 +51,10 @@ struct Context(Movable):
         def body(hdl: AnyCoroutine) {self}:
             _spawn_synchronize_coro(self._executor)
 
-            self._executor[].add(hdl)
+            # TODO: re-queue the task's existing `_TaskHandle` instead of
+            # wrapping `hdl` in a new, non-owning one, e.g. via a map in the
+            # executor from each task's frames to its handle.
+            self._executor[].add(ArcPointer(_TaskHandle(suspended=hdl)))
 
         _suspend_async(body)
 
