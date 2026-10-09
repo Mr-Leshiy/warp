@@ -65,9 +65,13 @@ struct Task[
             return self.is_completed()
 
         self._executor[].wait_until[completed]()
-        # `completed` reading `_handle` doesn't keep it alive: without this,
-        # it would be destroyed — freeing the hook `completed` reads — before
-        # the wait even starts.
+        # TODO: drop this once the executor keeps a task's handle until it
+        # completes, rather than re-queuing its suspended frames bare.
+        
+        # In a `deinit self` method each field is destroyed right after its
+        # last use, and `completed` reading `_handle` doesn't count as one, so
+        # it would be destroyed as soon as `wait` starts. The wait needs it
+        # (its hook and coroutine), so destroy it only once the wait is over.
         _ = self._handle^
         return self._result^
 
