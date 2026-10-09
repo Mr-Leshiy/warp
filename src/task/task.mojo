@@ -1,16 +1,10 @@
-from std.builtin._coroutine import AnyCoroutine, Coroutine
+from std.builtin._coroutine import Coroutine
 from std.collections.optional import Optional
 from std.memory import ArcPointer
 
 from ..executor import _ExecutorInner
-from .context import _CoroutineContext
-from .completion import (
-    CompletionCallback,
-    _CompletionHook,
-    _CompletionHookPointer,
-    _completion_hook_ptr,
-    _install_completion_hook,
-)
+from .completion import CompletionCallback
+from .handle import _TaskHandle
 
 
 struct Task[
@@ -20,13 +14,12 @@ struct Task[
 ](Movable where False):
     """A coroutine queued on an `Executor`, and the result it will produce.
 
-    Immovable: the coroutine writes its result and completion hook through
-    pointers into this struct.
+    Immovable: the coroutine writes its result through a pointer into this
+    struct.
     """
 
     var _executor: ArcPointer[_ExecutorInner]
-    var _handle: AnyCoroutine
-    var _hook: _CompletionHook[Self.CallbackPayload]
+    var _handle: ArcPointer[_TaskHandle]
     var _result: Self.type
 
     def __init__(
@@ -49,7 +42,6 @@ struct Task[
                 reads as completed. None by default.
         """
         self._executor = executor^
-        self._hook = _CompletionHook(callback^)
 
         # `_result` isn't actually written yet — the coroutine writes it,
         # through the pointer handed to `_set_result_slot` below — but every
@@ -60,19 +52,12 @@ struct Task[
         )
         handle._set_result_slot(Pointer(to=self._result))
 
-        _install_completion_hook(
-            handle._get_ctx[
-                _CoroutineContext[_CompletionHookPointer[Self.CallbackPayload]]
-            ](),
-            _completion_hook_ptr(self._hook),
-        )
-
-        self._handle = handle^._take_handle()
+        self._handle = ArcPointer(_TaskHandle(handle^, callback^))
 
     def wait(deinit self) raises -> Self.type:
         """Run the executor until this task completes, then take its result.
 
-        Consumes the task: the flag and the result slot it owns die with it.
+        Consumes the task: the hook and the result slot it owns die with it.
         """
 
         @__parameter
@@ -80,6 +65,14 @@ struct Task[
             return self.is_completed()
 
         self._executor[].wait_until[completed]()
+        # TODO: drop this once the executor keeps a task's handle until it
+        # completes, rather than re-queuing its suspended frames bare.
+
+        # In a `deinit self` method each field is destroyed right after its
+        # last use, and `completed` reading `_handle` doesn't count as one, so
+        # it would be destroyed as soon as `wait` starts. The wait needs it
+        # (its hook and coroutine), so destroy it only once the wait is over.
+        _ = self._handle^
         return self._result^
 
     def is_completed(self) -> Bool:
@@ -88,4 +81,13 @@ struct Task[
         A task that has not started, or that is parked on an `await`, reads as
         False; once True, the result is there.
         """
-        return self._hook.is_completed()
+        return self._handle[].is_completed()
+
+    def handle(self) -> ArcPointer[_TaskHandle]:
+        """Return a new reference to this task's coroutine and completion
+        hook.
+
+        Returns:
+            The shared task handle, for queueing on an executor.
+        """
+        return self._handle.copy()

@@ -5,14 +5,13 @@ from std.builtin._coroutine import (
     AnyCoroutine,
     Coroutine,
     RaisingCoroutine,
-    _coro_resume_fn,
-    _coro_destroy_fn,
 )
 from std.collections import Deque
 from std.memory import ArcPointer, OwnedPointer
 
 from .context import Context
 from .task import RaisingTask, Task
+from .task.handle import _TaskHandle
 
 
 # TODO: revisit `Copyable` (added so tests can hand coroutines their own
@@ -54,7 +53,7 @@ struct Executor(Copyable):
             handle: The coroutine to run. Ownership is transferred.
         """
         task = Task(handle^, self._inner.copy())
-        self._inner[].add(task._handle)
+        self._inner[].add(task.handle())
 
     def add[
         type: Deinitable & Movable, origins: OriginSet
@@ -72,7 +71,7 @@ struct Executor(Copyable):
             handle: The raising coroutine to run. Ownership is transferred.
         """
         task = RaisingTask(handle^, self._inner.copy())
-        self._inner[].add(task._handle)
+        self._inner[].add(task.handle())
 
     def add(self, handle: AnyCoroutine):
         """Queue a bare coroutine handle, without a task tracking it.
@@ -120,12 +119,14 @@ struct _ExecutorInner:
     # dropping the append. Behind a pointer the header lives outside that
     # borrow and both paths agree on it. Note that the queue is genuinely
     # shared-mutable across those two paths, so `OwnedPointer`'s uniqueness
-    # claim is a fiction the optimizer is free to act on. `_sync_counter`
+    # claim is a fiction the optimizer is free to act on. `_has_sync_coro`
     # below is read and written through the same two paths, for the same
     # reason, so it lives behind a pointer too.
     # (Analysis by Claude)
-    var _q: OwnedPointer[Deque[AnyCoroutine]]
+    var _q: OwnedPointer[Deque[ArcPointer[_TaskHandle]]]
 
+    # Whether a device-sync coroutine is queued and not yet completed; keeps
+    # `_spawn_synchronize_coro` from queueing more than one at a time.
     var _has_sync_coro: OwnedPointer[Bool]
 
     def __init__(out self, ctx: DeviceContext):
@@ -135,25 +136,25 @@ struct _ExecutorInner:
             ctx: The device context shared by every task on this executor.
         """
         self._ctx = ctx
-        self._q = OwnedPointer(Deque[AnyCoroutine]())
+        self._q = OwnedPointer(Deque[ArcPointer[_TaskHandle]]())
         self._has_sync_coro = OwnedPointer(False)
 
-    def __deinit__(deinit self):
-        """Destroy every coroutine still queued."""
-        try:
-            while len(self._q[]) > 0:
-                var handle = self._q[].popleft()
-                _coro_destroy_fn(handle)
-        except:
-            pass
+    def add(mut self, var handle: ArcPointer[_TaskHandle]):
+        """Queue a freshly created task's coroutine.
+
+        Args:
+            handle: The task's handle. The queue holds this reference until
+                the coroutine is resumed.
+        """
+        self._q[].append(handle^)
 
     def add(mut self, handle: AnyCoroutine):
-        """Queue a coroutine: freshly created, or resuming after a yield.
+        """Queue a coroutine resuming after a yield.
 
         Args:
             handle: The coroutine to run. The caller keeps ownership of it.
         """
-        self._q[].append(handle)
+        self.add(ArcPointer(_TaskHandle(coro_handle=handle)))
 
     def wait(mut self) raises:
         """Run queued coroutines until all have completed."""
@@ -164,6 +165,7 @@ struct _ExecutorInner:
 
         self.wait_until[never]()
 
+    # TODO: it must not raise any error
     @no_inline
     def wait_until[predicate: def() thin capturing -> Bool](mut self) raises:
         """Run queued coroutines until `predicate` holds or the queue empties.
@@ -175,4 +177,4 @@ struct _ExecutorInner:
 
         while not predicate() and len(self._q[]) > 0:
             var handle = self._q[].popleft()
-            _coro_resume_fn(handle)
+            handle[].resume_coroutine()

@@ -1,3 +1,6 @@
+from .completion import _CompletionHookPtr
+
+
 struct _CoroutineContext[P: TrivialRegisterPassable](TrivialRegisterPassable):
     """A generic completion context, assigned to a coroutine's frame.
 
@@ -16,3 +19,10 @@ struct _CoroutineContext[P: TrivialRegisterPassable](TrivialRegisterPassable):
 
     var callback: Self.callback_fn_type
     var payload: Self.P
+
+
+comptime _CoroutineContextPtr[CallbackPayload: Movable & Deinitable] = Pointer[
+    _CoroutineContext[_CompletionHookPtr[CallbackPayload]],
+    MutUntrackedOrigin,
+]
+"""Pointer to a task coroutine's context slot, holding its completion hook."""
