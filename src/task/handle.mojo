@@ -30,29 +30,12 @@ struct _TaskHandle(Movable):
     """
 
     var _handle: AnyCoroutine
+    var _resume_at: AnyCoroutine
+    """The frame to resume next: the task's own coroutine, or one it's
+    awaiting that suspended (see `set_resume_at`)."""
     var _hook: _ErasedCompletionHookPtr
     var _hook_deinit: def(_ErasedCompletionHookPtr) thin -> None
     """Destroys and frees `_hook`; the one operation that needs its type."""
-    var _owns_coroutine: Bool
-    """False for a frame re-queued after a yield (see `suspended`)."""
-
-    def __init__(out self, *, suspended: AnyCoroutine):
-        """Wrap a frame re-queued after a yield, without owning it.
-
-        A yield hands the executor the frame that suspended: the task's own
-        coroutine or one it's awaiting. That frame already belongs to someone,
-        and its context slot is in use (the task's hook, or "resume my
-        parent"). So this installs no hook and never destroys the frame:
-        doing either would cut the task off from its hook, or destroy a frame
-        that's still queued, after which resuming it restarts it from the top.
-
-        Args:
-            suspended: The suspended frame to resume. Its owner keeps it.
-        """
-        self._handle = suspended
-        self._hook = _ErasedCompletionHookPtr.unsafe_dangling()  # never read
-        self._hook_deinit = _hook_deinit[NoneType]  # never called
-        self._owns_coroutine = False
 
     def __init__[
         CallbackPayload: Movable & Deinitable = NoneType,
@@ -71,20 +54,31 @@ struct _TaskHandle(Movable):
                 reads as completed. Ownership is transferred.
         """
         self._handle = coro_handle
+        self._resume_at = self._handle
         var hook = _allocate_completion_hook(self._handle, callback^)
         self._hook = hook.unsafe_bitcast[NoneType]()
         self._hook_deinit = _hook_deinit[CallbackPayload]
-        self._owns_coroutine = True
 
     def __deinit__(deinit self):
-        """Destroy the coroutine and free its completion hook, if this handle
-        owns them."""
-        if self._owns_coroutine:
-            self._hook_deinit(self._hook)
-            _coro_destroy_fn(self._handle)
+        """Destroy the coroutine and free its completion hook."""
+        self._hook_deinit(self._hook)
+        _coro_destroy_fn(self._handle)
+
+    def set_resume_at(mut self, frame: AnyCoroutine):
+        """Record the frame that suspended, so the next resume picks up there.
+
+        A task suspends in whichever frame hit the yield: its own coroutine or
+        one it's awaiting. Resuming the task's own frame instead would carry
+        it past its `await` as if the awaited coroutine had completed.
+
+        Args:
+            frame: The suspended frame. The task keeps owning it.
+        """
+        self._resume_at = frame
 
     def resume_coroutine(self):
-        _coro_resume_fn(self._handle)
+        """Resume the task from the frame it last suspended in."""
+        _coro_resume_fn(self._resume_at)
 
     def has_error(self) -> Bool:
         """Return True if the completed coroutine raised rather than returned.
@@ -96,8 +90,6 @@ struct _TaskHandle(Movable):
     def is_completed(self) -> Bool:
         """Return True once the coroutine has run to completion and its
         callback, if any, has run."""
-        if not self._owns_coroutine:
-            return False
         return self._hook.unsafe_bitcast[_COMPLETED_FLAG_TYPE]()[].load() != 0
 
 
@@ -107,7 +99,3 @@ def _hook_deinit[
     var ptr = hook.unsafe_bitcast[_CompletionHook[CallbackPayload]]()
     ptr.unsafe_deinit_pointee()
     ptr.unsafe_free()
-
-
-def _no_hook_deinit(hook: _ErasedCompletionHookPtr):
-    pass

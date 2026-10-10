@@ -10,7 +10,6 @@ from std.collections import Deque
 from std.memory import ArcPointer
 
 from .executor import _ExecutorInner
-from .task.handle import _TaskHandle
 from .coros import _spawn_synchronize_coro
 
 
@@ -43,18 +42,14 @@ struct Context(Movable):
 
         Note:
             Only a coroutine spawned on the executor this context came from may
-            await this. It re-queues the caller onto that executor's queue, so
-            awaiting it from anywhere else hands the coroutine to a runtime that
-            is not the one driving it.
+            await this. It re-queues the task that executor is running, so
+            awaiting it from anywhere else aborts, since that executor isn't
+            running a task.
         """
 
         def body(hdl: AnyCoroutine) {self}:
             _spawn_synchronize_coro(self._executor)
-
-            # TODO: re-queue the task's existing `_TaskHandle` instead of
-            # wrapping `hdl` in a new, non-owning one, e.g. via a map in the
-            # executor from each task's frames to its handle.
-            self._executor[].add(ArcPointer(_TaskHandle(suspended=hdl)))
+            self._executor[].requeue_current(hdl)
 
         _suspend_async(body)
 

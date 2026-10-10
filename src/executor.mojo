@@ -7,7 +7,9 @@ from std.builtin._coroutine import (
     RaisingCoroutine,
 )
 from std.collections import Deque
+from std.collections.optional import Optional
 from std.memory import ArcPointer, OwnedPointer
+from std.os import abort
 
 from .context import Context
 from .task import RaisingTask, Task
@@ -74,7 +76,11 @@ struct Executor(Copyable):
         self._inner[].add(task.handle())
 
     def add(self, handle: AnyCoroutine):
-        """Queue a bare coroutine handle, without a task tracking it.
+        """Re-queue the running task, to resume from a frame of it that just
+        suspended.
+
+        Must be called from a suspend body, while this executor is running
+        the task that `handle` belongs to; aborts otherwise.
 
         Note:
             A suspend body that only calls this is straight-line code, which
@@ -97,9 +103,10 @@ struct Executor(Copyable):
             ```
 
         Args:
-            handle: The coroutine to resume. The caller keeps ownership of it.
+            handle: The suspended frame: the task's own coroutine or one it's
+                awaiting. The task keeps ownership of it.
         """
-        self._inner[].add(ArcPointer(_TaskHandle(suspended=handle)))
+        self._inner[].requeue_current(handle)
 
     def wait(self) raises:
         """Run queued tasks until all have completed, then sync the device."""
@@ -121,13 +128,18 @@ struct _ExecutorInner:
     # shared-mutable across those two paths, so `OwnedPointer`'s uniqueness
     # claim is a fiction the optimizer is free to act on. `_has_sync_coro`
     # below is read and written through the same two paths, for the same
-    # reason, so it lives behind a pointer too.
+    # reason, so it lives behind a pointer too. So does `_current`.
     # (Analysis by Claude)
     var _q: OwnedPointer[Deque[ArcPointer[_TaskHandle]]]
 
     # Whether a device-sync coroutine is queued and not yet completed; keeps
     # `_spawn_synchronize_coro` from queueing more than one at a time.
     var _has_sync_coro: OwnedPointer[Bool]
+
+    # The task `wait_until` is resuming right now, if any. A coroutine that
+    # suspends belongs to it, so this is what re-queues it — whichever of the
+    # task's frames suspended.
+    var _current: OwnedPointer[Optional[ArcPointer[_TaskHandle]]]
 
     def __init__(out self, ctx: DeviceContext):
         """Initialize the shared state with an empty queue.
@@ -138,6 +150,7 @@ struct _ExecutorInner:
         self._ctx = ctx
         self._q = OwnedPointer(Deque[ArcPointer[_TaskHandle]]())
         self._has_sync_coro = OwnedPointer(False)
+        self._current = OwnedPointer(Optional[ArcPointer[_TaskHandle]](None))
 
     def add(mut self, var handle: ArcPointer[_TaskHandle]):
         """Queue a freshly created task's coroutine.
@@ -147,6 +160,22 @@ struct _ExecutorInner:
                 the coroutine is resumed.
         """
         self._q[].append(handle^)
+
+    def requeue_current(mut self, frame: AnyCoroutine):
+        """Re-queue the running task, to resume from the frame that suspended.
+
+        Aborts if no task is running: the suspending coroutine isn't being
+        driven by this executor.
+
+        Args:
+            frame: The suspended frame: the task's own coroutine or one it's
+                awaiting. The task keeps ownership of it.
+        """
+        if not self._current[]:
+            abort("a coroutine suspended on an executor that isn't running it")
+        var current = self._current[].value().copy()
+        current[].set_resume_at(frame)
+        self.add(current^)
 
     def wait(mut self) raises:
         """Run queued coroutines until all have completed."""
@@ -169,4 +198,9 @@ struct _ExecutorInner:
 
         while not predicate() and len(self._q[]) > 0:
             var handle = self._q[].popleft()
+            # Saved and restored rather than cleared, in case the coroutine
+            # runs a nested `wait_until` (a blocking `wait` on another task).
+            var outer = self._current[].copy()
+            self._current[] = handle.copy()
             handle[].resume_coroutine()
+            self._current[] = outer^
