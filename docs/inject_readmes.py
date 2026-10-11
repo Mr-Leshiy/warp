@@ -14,11 +14,16 @@ import os
 import re
 
 CONTENT_ROOT = "docs/site/content"
+# The package sources live in `src/`, but the package (and its generated
+# content directory) is named `warp`.
+SRC_ROOT = "src"
+PACKAGE = "warp"
 
 
 def main() -> None:
-    for readme in glob.glob("src/**/README.md", recursive=True):
-        index = os.path.join(CONTENT_ROOT, os.path.dirname(readme), "_index.md")
+    for readme in glob.glob(f"{SRC_ROOT}/**/README.md", recursive=True):
+        rel = os.path.relpath(os.path.dirname(readme), SRC_ROOT)
+        index = os.path.join(CONTENT_ROOT, PACKAGE, rel, "_index.md")
         if not os.path.isfile(index):
             continue
         doc = open(index).read()
