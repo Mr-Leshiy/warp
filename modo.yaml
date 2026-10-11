@@ -50,7 +50,7 @@ templates: []
 pre-run:
   - |
     echo "Generating API JSON with 'mojo doc'..."
-    mojo doc -I . -o docs/src/warp.json warp
+    mojo doc -o docs/src/warp.json src
     echo "Done."
 
 # Bash scripts to run before build.
