@@ -108,5 +108,34 @@ def test_mixed_yielding_and_non_yielding_tasks_complete_correctly() raises:
         assert_equal(t4^.wait(), 1)
 
 
+async def _nested_yield[n: Int](executor: Executor) -> Int:
+    comptime assert n >= 0
+
+    comptime if n == 0:
+        await suspend(executor)
+        return 1
+    else:
+        return 1 + await _nested_yield[n - 1](executor)
+
+
+def test_nested_yielding_tasks() raises:
+    with DeviceContext() as ctx:
+        var executor = Executor(ctx)
+        var shared = executor.copy()
+
+        # Each task parks at the bottom of its chain, so resuming it has to
+        # unwind back up through every enclosing frame. Two tasks of
+        # different depths run side by side on one executor.
+        var deep = executor.add(_nested_yield[16](shared.copy()))
+        var shallow = executor.add(_nested_yield[3](shared.copy()))
+
+        executor.wait()
+
+        assert_true(deep.is_completed())
+        assert_true(shallow.is_completed())
+        assert_equal(deep^.wait(), 17)
+        assert_equal(shallow^.wait(), 4)
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()
