@@ -1,25 +1,29 @@
 """The queue that runs the coroutines and the device context they share."""
 
 from max.gpu.host import DeviceContext
-from std.builtin.coroutine import (
+from std.builtin._coroutine import (
     AnyCoroutine,
     Coroutine,
     RaisingCoroutine,
-    _coro_resume_fn,
-    _coro_destroy_fn,
 )
 from std.collections import Deque
+from std.collections.optional import Optional
 from std.memory import ArcPointer, OwnedPointer
+from std.os import abort
 
 from .context import Context
 from .task import RaisingTask, Task
+from .task.handle import _TaskHandle
 
 
-struct Executor(Movable):
+# TODO: revisit `Copyable` (added so tests can hand coroutines their own
+# executor handle); consider making `Executor` `Movable` only again.
+struct Executor(Copyable):
     """Runs coroutines that share one GPU device context.
 
     Tasks are queued by `add` and only make progress inside `wait`, which
-    resumes them in turn until every one of them has completed.
+    resumes them in turn until every one of them has completed. Copies share
+    the same queue and device context.
     """
 
     var _inner: ArcPointer[_ExecutorInner]
@@ -51,7 +55,7 @@ struct Executor(Movable):
             handle: The coroutine to run. Ownership is transferred.
         """
         task = Task(handle^, self._inner.copy())
-        self._inner[].add(task._handle, False)
+        self._inner[].add(task.handle())
 
     def add[
         type: Deinitable & Movable, origins: OriginSet
@@ -69,7 +73,40 @@ struct Executor(Movable):
             handle: The raising coroutine to run. Ownership is transferred.
         """
         task = RaisingTask(handle^, self._inner.copy())
-        self._inner[].add(task._handle, False)
+        self._inner[].add(task.handle())
+
+    def add(self, handle: AnyCoroutine):
+        """Re-queue the running task, to resume from a frame of it that just
+        suspended.
+
+        Must be called from a suspend body, while this executor is running
+        the task that `handle` belongs to; aborts otherwise.
+
+        Note:
+            A suspend body that only calls this is straight-line code, which
+            can trigger a compiler crash
+            (https://github.com/modular/modular/issues/7257): a small `raises`
+            coroutine that suspends this way gets inlined into the `raises`
+            coroutine awaiting it, and lowering fails with
+            `'pop.cast_from_builtin' op cannot convert to scalar dtype bool`.
+            To work around it on the caller side, mark the awaited `raises`
+            coroutine `@no_inline`:
+
+            ```mojo
+            @no_inline
+            async def inner(executor: Executor) raises -> Int:
+                await suspend(executor)  # suspends via `executor.add(hdl)`
+                raise Error("failure")
+
+            async def outer(executor: Executor) raises -> Int:
+                return await inner(executor)
+            ```
+
+        Args:
+            handle: The suspended frame: the task's own coroutine or one it's
+                awaiting. The task keeps ownership of it.
+        """
+        self._inner[].requeue_current(handle)
 
     def wait(self) raises:
         """Run queued tasks until all have completed, then sync the device."""
@@ -89,24 +126,20 @@ struct _ExecutorInner:
     # dropping the append. Behind a pointer the header lives outside that
     # borrow and both paths agree on it. Note that the queue is genuinely
     # shared-mutable across those two paths, so `OwnedPointer`'s uniqueness
-    # claim is a fiction the optimizer is free to act on. `_sync_counter`
+    # claim is a fiction the optimizer is free to act on. `_has_sync_coro`
     # below is read and written through the same two paths, for the same
-    # reason, so it lives behind a pointer too.
+    # reason, so it lives behind a pointer too. So does `_current`.
     # (Analysis by Claude)
-    var _q: OwnedPointer[Deque[AnyCoroutine]]
+    var _q: OwnedPointer[Deque[ArcPointer[_TaskHandle]]]
 
-    # How many pops, from the front of `_q`, until we reach the first
-    # coroutine that's resuming after a `Context.synchronize()` yield. `0`
-    # means none is currently queued.
-    #
-    # A device sync is a global barrier, so firing it once, right before
-    # that first tracked pop, is enough to cover every other "resuming after
-    # a yield" coroutine queued behind it too — their GPU work was launched
-    # even earlier in real time, so the same sync flushes it as well. That's
-    # why `add` only sets this when it's `0`: anything that yields while a
-    # sync is already pending rides it for free instead of scheduling a
-    # redundant one.
-    var _sync_counter: OwnedPointer[Int]
+    # Whether a device-sync coroutine is queued and not yet completed; keeps
+    # `_spawn_synchronize_coro` from queueing more than one at a time.
+    var _has_sync_coro: OwnedPointer[Bool]
+
+    # The task `wait_until` is resuming right now, if any. A coroutine that
+    # suspends belongs to it, so this is what re-queues it — whichever of the
+    # task's frames suspended.
+    var _current: OwnedPointer[Optional[ArcPointer[_TaskHandle]]]
 
     def __init__(out self, ctx: DeviceContext):
         """Initialize the shared state with an empty queue.
@@ -115,48 +148,46 @@ struct _ExecutorInner:
             ctx: The device context shared by every task on this executor.
         """
         self._ctx = ctx
-        self._q = OwnedPointer(Deque[AnyCoroutine]())
-        self._sync_counter = OwnedPointer(0)
+        self._q = OwnedPointer(Deque[ArcPointer[_TaskHandle]]())
+        self._has_sync_coro = OwnedPointer(False)
+        self._current = OwnedPointer(Optional[ArcPointer[_TaskHandle]](None))
 
-    def __deinit__(deinit self):
-        """Destroy every coroutine still queued."""
-        try:
-            while len(self._q[]) > 0:
-                var handle = self._q[].popleft()
-                _coro_destroy_fn(handle)
-        except:
-            pass
-
-    def add(mut self, handle: AnyCoroutine, is_need_sync: Bool):
-        """Queue a coroutine: freshly created, or resuming after a yield.
+    def add(mut self, var handle: ArcPointer[_TaskHandle]):
+        """Queue a freshly created task's coroutine.
 
         Args:
-            handle: The coroutine to run. The caller keeps ownership of it.
-            is_need_sync: True if `handle` is resuming after
-                `Context.synchronize()` suspended it, so it may depend on
-                GPU work it queued right before yielding and needs the
-                device synced before it runs again. False for a freshly
-                created task, which hasn't launched anything yet and so
-                never needs a sync of its own.
+            handle: The task's handle. The queue holds this reference until
+                the coroutine is resumed.
         """
-        self._q[].append(handle)
-        # Only the *first* pending "needs sync" coroutine claims the
-        # counter — see the field comment above. Its value is `handle`'s
-        # 1-indexed position in the queue once appended below (`len(_q)`
-        # items already ahead of it, plus itself); `wait_until` counts pops
-        # down to that exact position before resuming it.
-        if is_need_sync and self._sync_counter[] == 0:
-            self._sync_counter[] = len(self._q[])
+        self._q[].append(handle^)
+
+    def requeue_current(mut self, frame: AnyCoroutine):
+        """Re-queue the running task, to resume from the frame that suspended.
+
+        Aborts if no task is running: the suspending coroutine isn't being
+        driven by this executor.
+
+        Args:
+            frame: The suspended frame: the task's own coroutine or one it's
+                awaiting. The task keeps ownership of it.
+        """
+        if not self._current[]:
+            abort("a coroutine suspended on an executor that isn't running it")
+        var current = self._current[].value().copy()
+        current[].set_resume_at(frame)
+        self.add(current^)
 
     def wait(mut self) raises:
         """Run queued coroutines until all have completed."""
 
-        @parameter
+        @__parameter
         def never() -> Bool:
             return False
 
         self.wait_until[never]()
 
+    # TODO: it must not raise any error
+    @no_inline
     def wait_until[predicate: def() thin capturing -> Bool](mut self) raises:
         """Run queued coroutines until `predicate` holds or the queue empties.
 
@@ -167,14 +198,9 @@ struct _ExecutorInner:
 
         while not predicate() and len(self._q[]) > 0:
             var handle = self._q[].popleft()
-
-            # `handle` is the tracked "needs sync" coroutine exactly when
-            # the countdown reaches 1: sync now, before resuming it — not
-            # before any of the fresh/no-op coroutines popped earlier.
-            if self._sync_counter[] == 1:
-                self._ctx.synchronize()
-
-            if self._sync_counter[] > 0:
-                self._sync_counter[] -= 1
-
-            _coro_resume_fn(handle)
+            # Saved and restored rather than cleared, in case the coroutine
+            # runs a nested `wait_until` (a blocking `wait` on another task).
+            var outer = self._current[].copy()
+            self._current[] = handle.copy()
+            handle[].resume_coroutine()
+            self._current[] = outer^

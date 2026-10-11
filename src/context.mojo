@@ -1,7 +1,7 @@
 """The handle a running coroutine has on its executor."""
 
 from max.gpu.host import DeviceContext
-from std.builtin.coroutine import (
+from std.builtin._coroutine import (
     AnyCoroutine,
     _coro_resume_fn,
     _suspend_async,
@@ -10,6 +10,7 @@ from std.collections import Deque
 from std.memory import ArcPointer
 
 from .executor import _ExecutorInner
+from .coros import _spawn_synchronize_coro
 
 
 struct Context(Movable):
@@ -41,35 +42,17 @@ struct Context(Movable):
 
         Note:
             Only a coroutine spawned on the executor this context came from may
-            await this. It re-queues the caller onto that executor's queue, so
-            awaiting it from anywhere else hands the coroutine to a runtime that
-            is not the one driving it.
+            await this. It re-queues the task that executor is running, so
+            awaiting it from anywhere else aborts, since that executor isn't
+            running a task.
         """
 
-        @parameter
-        def body(hdl: AnyCoroutine):
-            # is_need_sync=True: `hdl` launched GPU work right before this
-            # yield, so it must not resume until the device has synced.
-            self._executor[].add(hdl, True)
+        def body(hdl: AnyCoroutine) {self}:
+            _spawn_synchronize_coro(self._executor)
+            self._executor[].requeue_current(hdl)
 
-        _suspend_async[body]()
+        _suspend_async(body)
 
 
-struct _CoroutineContext[P: TrivialRegisterPassable](TrivialRegisterPassable):
-    """A generic completion context, assigned to a coroutine's frame.
-
-    Replaces the stdlib's `_CoroutineContext` in the same slot, so it has to
-    keep that shape: a thin callback followed by the pointer-sized payload the
-    coroutine passes to it when it completes. Together the two fields must
-    total 16 bytes — a thin function pointer plus one pointer-sized `P` — to
-    match the size the stdlib reserves for it in the coroutine frame.
-
-    Parameterized over `P` so callers can carry whatever pointer-sized
-    payload their callback needs (e.g. a task's completion-flag pointer)
-    without `_CoroutineContext` itself knowing about tasks.
-    """
-
-    comptime callback_fn_type = def(Self.P) thin -> None
-
-    var callback: Self.callback_fn_type
-    var payload: Self.P
+async def _synchronize(mut ctx: DeviceContext) raises:
+    ctx.synchronize()
