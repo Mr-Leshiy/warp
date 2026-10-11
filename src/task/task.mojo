@@ -65,14 +65,13 @@ struct Task[
             return self.is_completed()
 
         self._executor[].wait_until[completed]()
-        # TODO: drop this once the executor keeps a task's handle until it
-        # completes, rather than re-queuing its suspended frames bare.
 
         # In a `deinit self` method each field is destroyed right after its
         # last use, and `completed` reading `_handle` doesn't count as one, so
-        # it would be destroyed as soon as `wait` starts. The wait needs it
-        # (its hook and coroutine), so destroy it only once the wait is over.
-        _ = self._handle^
+        # it would be destroyed as soon as `wait` starts. The queue keeps the
+        # handle alive only while the task is queued; if the task already
+        # completed, this is the last reference, and `completed` would read a
+        # freed hook. So destroy it only once the wait is over.
         return self._result^
 
     def is_completed(self) -> Bool:
