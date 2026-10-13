@@ -8,52 +8,65 @@ coalesces `DeviceContext.synchronize()` calls across queued tasks.
 > and should not be relied on for production use.
 
 ```mojo
-from max.gpu.host import DeviceContext
-from std.gpu import global_idx
-from warp import Context, Executor
+from max.gpu.host import DeviceContext, HostBuffer
+from max.gpu import global_idx
+from std.memory import unsafe_memcpy
+from warp import Context, Runtime
 
 
 def square_kernel(buf: Pointer[Float32, MutAnyOrigin], size: Int32):
     var idx = global_idx.x
-    if idx < size:
+    if idx < Int(size):
         var value = buf[unsafe_offset=idx]
         buf[unsafe_offset=idx] = value * value
+
+
+# Device calls live in a plain `def`: called directly inside an `async def`
+# they crash the compiler.
+def enqueue_square[
+    size: Int
+](ctx: Context, input: Array[Float32, size]) raises -> HostBuffer[
+    DType.float32
+]:
+    var device_buffer = ctx.enqueue_device_buffer(input)
+    ctx.gpu_ctx().enqueue_function[square_kernel](
+        device_buffer, Int32(size), grid_dim=1, block_dim=size
+    )
+    return ctx.enqueue_host_buffer(device_buffer)
 
 
 async def square[
     size: Int
 ](ctx: Context, input: Array[Float32, size]) raises -> Array[Float32, size]:
-    var device_buffer = ctx.gpu_ctx().enqueue_create_buffer[DType.float32](size)
-    ctx.gpu_ctx().enqueue_copy(
-        dst_buf=device_buffer, src_ptr=input.unsafe_ptr()
-    )
-
-    ctx.gpu_ctx().enqueue_function[square_kernel](
-        device_buffer, Int32(size), grid_dim=1, block_dim=size
-    )
+    var host_buffer = enqueue_square(ctx, input)
+    await ctx.synchronize()
 
     var result = Array[Float32, size](uninitialized=True)
-    ctx.gpu_ctx().enqueue_copy(
-        dst_ptr=result.unsafe_ptr(), src_buf=device_buffer
+    unsafe_memcpy(
+        dest=result.unsafe_ptr(), src=host_buffer.unsafe_ptr(), count=size
     )
-    await ctx.synchronize()
     return result^
 
 
 def main() raises:
     with DeviceContext() as ctx:
-        var executor = Executor(ctx)
-        var context = executor.context()
+        var runtime = Runtime(ctx)
+        var context = runtime.context()
 
+        # Run a single coroutine to completion and get its result.
         var input1: Array[Float32, 4] = [1, 2, 3, 4]
-        var t1 = executor.add(square(context, input1))
+        print(runtime.block_on(square(context, input1)))  # [1, 4, 9, 16]
 
+        # Or queue several tasks and run them concurrently.
         var input2: Array[Float32, 4] = [5, 6, 7, 8]
-        var t2 = executor.add(square(context, input2))
+        var t2 = runtime.add(square(context, input2))
 
-        executor.wait()
-        print(t1^.wait())  # [1, 4, 9, 16]
+        var input3: Array[Float32, 4] = [9, 10, 11, 12]
+        var t3 = runtime.add(square(context, input3))
+
+        runtime.wait()
         print(t2^.wait())  # [25, 36, 49, 64]
+        print(t3^.wait())  # [81, 100, 121, 144]
 ```
 
 ## Install
@@ -92,12 +105,15 @@ pixi run docs   # build the API docs site
 
 ## How it works
 
-- `Executor.add()` queues a task; nothing runs until `wait()`.
+- `Runtime.block_on()` runs one coroutine until it completes and returns its
+  result (or re-raises its error); other queued tasks only run while it's
+  pending.
+- `Runtime.add()` queues a task; nothing runs until `wait()`.
 - `wait()` pops queued coroutines FIFO and resumes each in turn. A
   coroutine keeps running until it returns or `await`s
-  `Context.synchronize()`, which hands control back to the executor.
+  `Context.synchronize()`, which hands control back to the runtime.
 - Only `await ctx.synchronize()` ever needs an actual device sync, and the
-  executor fires it lazily — once, right before the first coroutine that's
+  runtime fires it lazily — once, right before the first coroutine that's
   waiting on one resumes. Any other coroutine queued behind it rides that
   same sync for free instead of triggering its own.
 

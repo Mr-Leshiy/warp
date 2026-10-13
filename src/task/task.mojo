@@ -2,7 +2,7 @@ from std.builtin._coroutine import Coroutine
 from std.collections.optional import Optional
 from std.memory import ArcPointer
 
-from ..executor import _ExecutorInner
+from ..runtime import _RuntimeInner
 from .completion import CompletionCallback
 from .handle import _TaskHandle
 
@@ -12,20 +12,20 @@ struct Task[
     origins: OriginSet,
     CallbackPayload: Movable & Deinitable = NoneType,
 ](Movable where False):
-    """A coroutine queued on an `Executor`, and the result it will produce.
+    """A coroutine queued on a `Runtime`, and the result it will produce.
 
     Immovable: the coroutine writes its result through a pointer into this
     struct.
     """
 
-    var _executor: ArcPointer[_ExecutorInner]
+    var _runtime: ArcPointer[_RuntimeInner]
     var _handle: ArcPointer[_TaskHandle]
     var _result: Self.type
 
     def __init__(
         out self,
         var coro: Coroutine[Self.type, Self.origins],
-        var executor: ArcPointer[_ExecutorInner],
+        var runtime: ArcPointer[_RuntimeInner],
         var callback: Optional[CompletionCallback[Self.CallbackPayload]] = None,
     ):
         """Initialize a task with a coroutine.
@@ -36,12 +36,12 @@ struct Task[
         Args:
             coro: The coroutine to execute as a task. Ownership is
                 transferred.
-            executor: The executor running the coroutine. Ownership is
+            runtime: The runtime running the coroutine. Ownership is
                 transferred.
             callback: Called once the coroutine completes, before the task
                 reads as completed. None by default.
         """
-        self._executor = executor^
+        self._runtime = runtime^
 
         # `_result` isn't actually written yet — the coroutine writes it,
         # through the pointer handed to `_set_result_slot` below — but every
@@ -55,7 +55,7 @@ struct Task[
         self._handle = ArcPointer(_TaskHandle(coro^._take_handle(), callback^))
 
     def wait(deinit self) raises -> Self.type:
-        """Run the executor until this task completes, then take its result.
+        """Run the runtime until this task completes, then take its result.
 
         Consumes the task: the hook and the result slot it owns die with it.
         """
@@ -64,7 +64,7 @@ struct Task[
         def completed() -> Bool:
             return self.is_completed()
 
-        self._executor[].wait_until[completed]()
+        self._runtime[].wait_until[completed]()
 
         return self._result^
 
@@ -81,6 +81,6 @@ struct Task[
         hook.
 
         Returns:
-            The shared task handle, for queueing on an executor.
+            The shared task handle, for queueing on a runtime.
         """
         return self._handle.copy()

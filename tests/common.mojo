@@ -2,20 +2,20 @@
 
 from std.builtin._coroutine import AnyCoroutine, _suspend_async
 
-from warp.executor import Executor
+from warp.runtime import Runtime
 
 
-async def suspend(executor: Executor):
-    """Suspend the calling coroutine and re-queue it on `executor`.
+async def suspend(runtime: Runtime):
+    """Suspend the calling coroutine and re-queue it on `runtime`.
 
     A plain yield point for tests that only need a coroutine to give up
     control, without `Context.synchronize()`'s device sync on resume.
 
     Args:
-        executor: The executor running the calling coroutine.
+        runtime: The runtime running the calling coroutine.
     """
 
-    def body(hdl: AnyCoroutine) {executor}:
-        executor.add(hdl)
+    def body(hdl: AnyCoroutine) {runtime}:
+        runtime.add(hdl)
 
     _suspend_async(body)

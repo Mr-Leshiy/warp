@@ -1,10 +1,10 @@
 """A single-threaded async runtime for coroutines that drive a GPU.
 
-An `Executor` owns a `DeviceContext` and runs the `Task`s added to it; a
+A `Runtime` owns a `DeviceContext` and runs the `Task`s added to it; a
 coroutine reaches the device through a `Context` and suspends with `await` to
 let the others make progress.
 """
 
-from .executor import Executor
+from .runtime import Runtime
 from .task import Task, RaisingTask
 from .context import Context

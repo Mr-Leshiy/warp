@@ -3,7 +3,7 @@ from max.gpu import global_idx
 from std.testing import TestSuite, assert_equal
 
 from warp.context import Context
-from warp.executor import Executor
+from warp.runtime import Runtime
 
 
 # Iterations of busy work in `square_kernel`.
@@ -80,19 +80,19 @@ async def square[
 
 def test_synchronize_completes_a_real_device_round_trip() raises:
     with DeviceContext() as ctx:
-        var executor = Executor(ctx)
-        var context = executor.context()
+        var runtime = Runtime(ctx)
+        var context = runtime.context()
 
         var input: Array[Float32, 8] = [1, 2, 3, 4, 5, 6, 7, 8]
 
-        var t = executor.add(square(context, input))
+        var t = runtime.add(square(context, input))
         assert_equal(t^.wait(), [1, 4, 9, 16, 25, 36, 49, 64])
 
 
 def test_synchronize_scales_to_many_concurrent_gpu_tasks() raises:
     with DeviceContext() as ctx:
-        var executor = Executor(ctx)
-        var context = executor.context()
+        var runtime = Runtime(ctx)
+        var context = runtime.context()
 
         comptime ARRAY_SIZE = 8
 
@@ -102,28 +102,28 @@ def test_synchronize_scales_to_many_concurrent_gpu_tasks() raises:
         # moved into a `List` once created. Sixteen separately-named
         # locals is the straightforward way to hold that many of them
         # alive at once. All sixteen are queued -- none driven -- before
-        # the single `executor.wait()` below, so they really do run
-        # concurrently on one executor rather than one at a time.
+        # the single `runtime.wait()` below, so they really do run
+        # concurrently on one runtime rather than one at a time.
         var input = Array[Float32, ARRAY_SIZE](fill=3)
 
-        var t1 = executor.add(square[ARRAY_SIZE](context, input))
-        var t2 = executor.add(square[ARRAY_SIZE](context, input))
-        var t3 = executor.add(square[ARRAY_SIZE](context, input))
-        var t4 = executor.add(square[ARRAY_SIZE](context, input))
-        var t5 = executor.add(square[ARRAY_SIZE](context, input))
-        var t6 = executor.add(square[ARRAY_SIZE](context, input))
-        var t7 = executor.add(square[ARRAY_SIZE](context, input))
-        var t8 = executor.add(square[ARRAY_SIZE](context, input))
-        var t9 = executor.add(square[ARRAY_SIZE](context, input))
-        var t10 = executor.add(square[ARRAY_SIZE](context, input))
-        var t11 = executor.add(square[ARRAY_SIZE](context, input))
-        var t12 = executor.add(square[ARRAY_SIZE](context, input))
-        var t13 = executor.add(square[ARRAY_SIZE](context, input))
-        var t14 = executor.add(square[ARRAY_SIZE](context, input))
-        var t15 = executor.add(square[ARRAY_SIZE](context, input))
-        var t16 = executor.add(square[ARRAY_SIZE](context, input))
+        var t1 = runtime.add(square[ARRAY_SIZE](context, input))
+        var t2 = runtime.add(square[ARRAY_SIZE](context, input))
+        var t3 = runtime.add(square[ARRAY_SIZE](context, input))
+        var t4 = runtime.add(square[ARRAY_SIZE](context, input))
+        var t5 = runtime.add(square[ARRAY_SIZE](context, input))
+        var t6 = runtime.add(square[ARRAY_SIZE](context, input))
+        var t7 = runtime.add(square[ARRAY_SIZE](context, input))
+        var t8 = runtime.add(square[ARRAY_SIZE](context, input))
+        var t9 = runtime.add(square[ARRAY_SIZE](context, input))
+        var t10 = runtime.add(square[ARRAY_SIZE](context, input))
+        var t11 = runtime.add(square[ARRAY_SIZE](context, input))
+        var t12 = runtime.add(square[ARRAY_SIZE](context, input))
+        var t13 = runtime.add(square[ARRAY_SIZE](context, input))
+        var t14 = runtime.add(square[ARRAY_SIZE](context, input))
+        var t15 = runtime.add(square[ARRAY_SIZE](context, input))
+        var t16 = runtime.add(square[ARRAY_SIZE](context, input))
 
-        executor.wait()
+        runtime.wait()
 
         var expected = Array[Float32, ARRAY_SIZE](fill=9)
         assert_equal(t1^.wait(), expected)

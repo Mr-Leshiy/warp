@@ -2,7 +2,7 @@ from std.builtin._coroutine import RaisingCoroutine
 from std.collections.optional import Optional
 from std.memory import ArcPointer, forget_deinit
 
-from ..executor import _ExecutorInner
+from ..runtime import _RuntimeInner
 from .completion import CompletionCallback
 from .handle import _TaskHandle
 
@@ -12,14 +12,14 @@ struct RaisingTask[
     origins: OriginSet,
     CallbackPayload: Movable & Deinitable = NoneType,
 ](Movable where False):
-    """A raising coroutine queued on an `Executor`, and the result — or the
+    """A raising coroutine queued on a `Runtime`, and the result — or the
     error — it will produce.
 
     Immovable: the coroutine writes its result or error through pointers into
     this struct.
     """
 
-    var _executor: ArcPointer[_ExecutorInner]
+    var _runtime: ArcPointer[_RuntimeInner]
     var _handle: ArcPointer[_TaskHandle]
     var _result: Self.type
     var _error: Error
@@ -27,7 +27,7 @@ struct RaisingTask[
     def __init__(
         out self,
         var coro: RaisingCoroutine[Self.type, Self.origins],
-        var executor: ArcPointer[_ExecutorInner],
+        var runtime: ArcPointer[_RuntimeInner],
         var callback: Optional[CompletionCallback[Self.CallbackPayload]] = None,
     ):
         """Initialize a task with a raising coroutine.
@@ -38,12 +38,12 @@ struct RaisingTask[
         Args:
             coro: The raising coroutine to execute as a task. Ownership is
                 transferred.
-            executor: The executor running the coroutine. Ownership is
+            runtime: The runtime running the coroutine. Ownership is
                 transferred.
             callback: Called once the coroutine completes, before the task
                 reads as completed. None by default.
         """
-        self._executor = executor^
+        self._runtime = runtime^
 
         # Neither slot is actually written yet — the coroutine writes
         # whichever one it completes with, through the pointers handed to
@@ -60,7 +60,7 @@ struct RaisingTask[
         self._handle = ArcPointer(_TaskHandle(coro^._take_handle(), callback^))
 
     def wait(deinit self) raises -> Self.type:
-        """Run the executor until this task completes, then take its result.
+        """Run the runtime until this task completes, then take its result.
 
         Consumes the task: the hook and the result/error slots it owns die
         with it.
@@ -73,7 +73,7 @@ struct RaisingTask[
         def completed() -> Bool:
             return self.is_completed()
 
-        self._executor[].wait_until[completed]()
+        self._runtime[].wait_until[completed]()
 
         # `has_error` reading `_handle` here is also what keeps it — and the
         # hook `completed` reads — alive through the wait above.
@@ -100,6 +100,6 @@ struct RaisingTask[
         hook.
 
         Returns:
-            The shared task handle, for queueing on an executor.
+            The shared task handle, for queueing on a runtime.
         """
         return self._handle.copy()

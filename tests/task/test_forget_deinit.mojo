@@ -2,7 +2,7 @@
 not be deinitialized, and a written result must be dropped exactly once.
 
 These tests check `RaisingTask`'s slot ownership and destruction, not
-executor behavior. The executor is only used to run the coroutine to
+runtime behavior. The runtime is only used to run the coroutine to
 completion.
 """
 
@@ -10,7 +10,7 @@ from max.gpu.host import DeviceContext
 from std.memory import ArcPointer
 from std.testing import TestSuite, assert_equal, assert_raises
 
-from warp.executor import Executor
+from warp.runtime import Runtime
 
 
 @fieldwise_init
@@ -41,10 +41,10 @@ async def _constructs_drop_counter_then_maybe_raises(
 
 def test_forget_deinit_does_not_double_drop_the_unwritten_result_slot() raises:
     with DeviceContext() as ctx:
-        var executor = Executor(ctx)
+        var runtime = Runtime(ctx)
 
         var counter = _Counter(ArcPointer(0))
-        var task = executor.add(
+        var task = runtime.add(
             _constructs_drop_counter_then_maybe_raises(counter, True)
         )
         with assert_raises(contains="boom"):
@@ -60,10 +60,10 @@ def test_forget_deinit_does_not_double_drop_the_unwritten_result_slot() raises:
 
 def test_forget_deinit_does_not_leak_a_written_result_on_the_success_path() raises:
     with DeviceContext() as ctx:
-        var executor = Executor(ctx)
+        var runtime = Runtime(ctx)
 
         var counter = _Counter(ArcPointer(0))
-        var task = executor.add(
+        var task = runtime.add(
             _constructs_drop_counter_then_maybe_raises(counter, False)
         )
         var result = task^.wait()
