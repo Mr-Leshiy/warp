@@ -1,18 +1,18 @@
-"""The coroutine that synchronizes an executor's device for its tasks."""
+"""The coroutine that synchronizes a runtime's device for its tasks."""
 
 from std.memory import ArcPointer
 from max.gpu.host import DeviceContext
 
-from ..executor import _ExecutorInner
+from ..runtime import _RuntimeInner
 from ..task import RaisingTask, CompletionCallback
 
 
-def _spawn_synchronize_coro(executor: ArcPointer[_ExecutorInner]):
-    """Queue a coroutine that synchronizes the executor's device, unless one is
+def _spawn_synchronize_coro(runtime: ArcPointer[_RuntimeInner]):
+    """Queue a coroutine that synchronizes the runtime's device, unless one is
     already pending, so concurrent `Context.synchronize` calls share one sync.
 
     Args:
-        executor: The executor whose device to synchronize.
+        runtime: The runtime whose device to synchronize.
     """
 
     async def _synchronize(mut ctx: DeviceContext) raises:
@@ -20,17 +20,17 @@ def _spawn_synchronize_coro(executor: ArcPointer[_ExecutorInner]):
 
     # Clears the flag once the sync finishes, so the next sync request
     # spawns a fresh coroutine.
-    def _completion_callback(executor: ArcPointer[_ExecutorInner]):
-        executor[]._has_sync_coro[] = False
+    def _completion_callback(runtime: ArcPointer[_RuntimeInner]):
+        runtime[]._has_sync_coro[] = False
 
-    if not executor[]._has_sync_coro[]:
-        executor[]._has_sync_coro[] = True
+    if not runtime[]._has_sync_coro[]:
+        runtime[]._has_sync_coro[] = True
 
         var sync_coro = RaisingTask(
-            _synchronize(executor[]._ctx),
-            executor.copy(),
-            CompletionCallback[ArcPointer[_ExecutorInner]](
-                _completion_callback, executor.copy()
+            _synchronize(runtime[]._ctx),
+            runtime.copy(),
+            CompletionCallback[ArcPointer[_RuntimeInner]](
+                _completion_callback, runtime.copy()
             ),
         )
-        executor[].add(sync_coro.handle())
+        runtime[].add(sync_coro.handle())

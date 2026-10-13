@@ -8,7 +8,7 @@ from std.testing import (
 )
 
 from warp.context import Context
-from warp.executor import Executor
+from warp.runtime import Runtime
 
 
 async def _yield_once(context: Context) -> Int:
@@ -16,19 +16,19 @@ async def _yield_once(context: Context) -> Int:
     return 1
 
 
-def test_awaiting_context_from_a_different_executor_does_not_complete_the_task() raises:
+def test_awaiting_context_from_a_different_runtime_does_not_complete_the_task() raises:
     def __inner__() raises -> None:
         with DeviceContext() as ctx:
-            var executor1 = Executor(ctx)
-            var executor2 = Executor(ctx)
-            var context2 = executor2.context()
+            var runtime1 = Runtime(ctx)
+            var runtime2 = Runtime(ctx)
+            var context2 = runtime2.context()
 
-            # Queued on executor1, but the coroutine awaits a `Context` that
-            # belongs to executor2, which isn't running it -- so its yield
+            # Queued on runtime1, but the coroutine awaits a `Context` that
+            # belongs to runtime2, which isn't running it -- so its yield
             # aborts (see `Context.synchronize`'s docstring).
-            var task = executor1.add(_yield_once(context2))
+            var task = runtime1.add(_yield_once(context2))
 
-            executor1.wait()
+            runtime1.wait()
             # Keeps `task` alive through the wait: it's immovable because the
             # coroutine writes its result into it, so destroying it early
             # leaves the coroutine writing to freed memory.
@@ -36,7 +36,7 @@ def test_awaiting_context_from_a_different_executor_does_not_complete_the_task()
 
     _assert_aborts(
         __inner__,
-        contains="a coroutine suspended on an executor that isn't running it",
+        contains="a coroutine suspended on a runtime that isn't running it",
     )
 
 

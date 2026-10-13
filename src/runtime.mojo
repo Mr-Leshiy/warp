@@ -17,8 +17,8 @@ from .task.handle import _TaskHandle
 
 
 # TODO: revisit `Copyable` (added so tests can hand coroutines their own
-# executor handle); consider making `Executor` `Movable` only again.
-struct Executor(Copyable):
+# runtime handle); consider making `Runtime` `Movable` only again.
+struct Runtime(Copyable):
     """Runs coroutines that share one GPU device context.
 
     Tasks are queued by `add` and only make progress inside `wait`, which
@@ -26,18 +26,18 @@ struct Executor(Copyable):
     the same queue and device context.
     """
 
-    var _inner: ArcPointer[_ExecutorInner]
+    var _inner: ArcPointer[_RuntimeInner]
 
     def __init__(out self, ctx: DeviceContext):
-        """Initialize an executor running its tasks on the given device.
+        """Initialize a runtime running its tasks on the given device.
 
         Args:
-            ctx: The device context shared by every task on this executor.
+            ctx: The device context shared by every task on this runtime.
         """
-        self._inner = ArcPointer(_ExecutorInner(ctx))
+        self._inner = ArcPointer(_RuntimeInner(ctx))
 
     def context(self) -> Context:
-        """Return a context that coroutines use to reach this executor."""
+        """Return a context that coroutines use to reach this runtime."""
         return Context(self._inner.copy())
 
     def add[
@@ -79,7 +79,7 @@ struct Executor(Copyable):
         """Re-queue the running task, to resume from a frame of it that just
         suspended.
 
-        Must be called from a suspend body, while this executor is running
+        Must be called from a suspend body, while this runtime is running
         the task that `handle` belongs to; aborts otherwise.
 
         Note:
@@ -94,12 +94,12 @@ struct Executor(Copyable):
 
             ```mojo
             @no_inline
-            async def inner(executor: Executor) raises -> Int:
-                await suspend(executor)  # suspends via `executor.add(hdl)`
+            async def inner(runtime: Runtime) raises -> Int:
+                await suspend(runtime)  # suspends via `runtime.add(hdl)`
                 raise Error("failure")
 
-            async def outer(executor: Executor) raises -> Int:
-                return await inner(executor)
+            async def outer(runtime: Runtime) raises -> Int:
+                return await inner(runtime)
             ```
 
         Args:
@@ -113,14 +113,12 @@ struct Executor(Copyable):
         self._inner[].wait()
 
 
-struct _ExecutorInner:
-    """The executor state shared between the `Executor` and its `Context`s."""
-
+struct _RuntimeInner:
     var _ctx: DeviceContext
 
     # The queue has to stay behind a pointer. `wait` takes `mut self` — an
     # exclusive, `noalias` borrow — yet a coroutine it resumes reaches this
-    # same object through the `Context`'s executor pointer to enqueue itself.
+    # same object through the `Context`'s runtime pointer to enqueue itself.
     # Stored inline, the deque header would sit in that exclusively borrowed
     # memory and may be cached in registers across the resume, silently
     # dropping the append. Behind a pointer the header lives outside that
@@ -145,7 +143,7 @@ struct _ExecutorInner:
         """Initialize the shared state with an empty queue.
 
         Args:
-            ctx: The device context shared by every task on this executor.
+            ctx: The device context shared by every task on this runtime.
         """
         self._ctx = ctx
         self._q = OwnedPointer(Deque[ArcPointer[_TaskHandle]]())
@@ -165,14 +163,14 @@ struct _ExecutorInner:
         """Re-queue the running task, to resume from the frame that suspended.
 
         Aborts if no task is running: the suspending coroutine isn't being
-        driven by this executor.
+        driven by this runtime.
 
         Args:
             frame: The suspended frame: the task's own coroutine or one it's
                 awaiting. The task keeps ownership of it.
         """
         if not self._current[]:
-            abort("a coroutine suspended on an executor that isn't running it")
+            abort("a coroutine suspended on a runtime that isn't running it")
         var current = self._current[].value().copy()
         current[].set_resume_at(frame)
         self.add(current^)

@@ -10,7 +10,7 @@ coalesces `DeviceContext.synchronize()` calls across queued tasks.
 ```mojo
 from max.gpu.host import DeviceContext
 from std.gpu import global_idx
-from warp import Context, Executor
+from warp import Context, Runtime
 
 
 def square_kernel(buf: Pointer[Float32, MutAnyOrigin], size: Int32):
@@ -42,16 +42,16 @@ async def square[
 
 def main() raises:
     with DeviceContext() as ctx:
-        var executor = Executor(ctx)
-        var context = executor.context()
+        var runtime = Runtime(ctx)
+        var context = runtime.context()
 
         var input1: Array[Float32, 4] = [1, 2, 3, 4]
-        var t1 = executor.add(square(context, input1))
+        var t1 = runtime.add(square(context, input1))
 
         var input2: Array[Float32, 4] = [5, 6, 7, 8]
-        var t2 = executor.add(square(context, input2))
+        var t2 = runtime.add(square(context, input2))
 
-        executor.wait()
+        runtime.wait()
         print(t1^.wait())  # [1, 4, 9, 16]
         print(t2^.wait())  # [25, 36, 49, 64]
 ```
@@ -92,12 +92,12 @@ pixi run docs   # build the API docs site
 
 ## How it works
 
-- `Executor.add()` queues a task; nothing runs until `wait()`.
+- `Runtime.add()` queues a task; nothing runs until `wait()`.
 - `wait()` pops queued coroutines FIFO and resumes each in turn. A
   coroutine keeps running until it returns or `await`s
-  `Context.synchronize()`, which hands control back to the executor.
+  `Context.synchronize()`, which hands control back to the runtime.
 - Only `await ctx.synchronize()` ever needs an actual device sync, and the
-  executor fires it lazily — once, right before the first coroutine that's
+  runtime fires it lazily — once, right before the first coroutine that's
   waiting on one resumes. Any other coroutine queued behind it rides that
   same sync for free instead of triggering its own.
 
