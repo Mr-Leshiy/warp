@@ -30,7 +30,7 @@ struct _DropCounter(Movable):
         self._counter._inner[] += 1
 
 
-async def _constructs_drop_counter_then_maybe_raises(
+__async def _constructs_drop_counter_then_maybe_raises(
     counter: _Counter, should_raise: Bool
 ) raises -> _DropCounter:
     var drop_counter = _DropCounter(_Counter(counter._inner.copy()))
