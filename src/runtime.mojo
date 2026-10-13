@@ -112,6 +112,45 @@ struct Runtime(Copyable):
         """Run queued tasks until all have completed, then sync the device."""
         self._inner[].wait()
 
+    def block_on[
+        type: Deinitable & Movable, origins: OriginSet
+    ](mut self, var handle: Coroutine[type, origins]) raises -> type:
+        """Run a coroutine to completion and return its result.
+
+        Stops as soon as `handle` completes: other queued tasks only run while
+        it's still pending, and whatever is left stays queued for a later
+        `wait` or `block_on`.
+
+        Args:
+            handle: The coroutine to run. Ownership is transferred.
+
+        Returns:
+            The value the coroutine returned.
+        """
+        var task = self.add(handle^)
+        return task^.wait()
+
+    def block_on[
+        type: Deinitable & Movable, origins: OriginSet
+    ](mut self, var handle: RaisingCoroutine[type, origins]) raises -> type:
+        """Run a raising coroutine to completion and return its result.
+
+        Stops as soon as `handle` completes: other queued tasks only run while
+        it's still pending, and whatever is left stays queued for a later
+        `wait` or `block_on`.
+
+        Args:
+            handle: The raising coroutine to run. Ownership is transferred.
+
+        Returns:
+            The value the coroutine returned.
+
+        Raises:
+            The error the coroutine raised, if it raised one.
+        """
+        var task = self.add(handle^)
+        return task^.wait()
+
 
 struct _RuntimeInner:
     var _ctx: DeviceContext
