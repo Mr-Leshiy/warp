@@ -11,22 +11,22 @@ from warp.runtime import Runtime
 from tests.common import suspend
 
 
-async def _yields_twice[VALUE: Int](runtime: Runtime) -> Int:
-    await suspend(runtime)
-    await suspend(runtime)
+__async def _yields_twice[VALUE: Int](runtime: Runtime) -> Int:
+    __await suspend(runtime)
+    __await suspend(runtime)
     return VALUE
 
 
-async def _raises_after_yield(runtime: Runtime) raises -> Int:
-    await suspend(runtime)
+__async def _raises_after_yield(runtime: Runtime) raises -> Int:
+    __await suspend(runtime)
     raise Error("root failure")
 
 
-async def _spawns_and_waits(runtime: Runtime) raises -> Int:
+__async def _spawns_and_waits(runtime: Runtime) raises -> Int:
     var spawner = runtime.copy()
     var first = spawner.add(_yields_twice[10](runtime.copy()))
     var second = spawner.add(_yields_twice[20](runtime.copy()))
-    await suspend(runtime)
+    __await suspend(runtime)
     return first^.wait() + second^.wait()
 
 

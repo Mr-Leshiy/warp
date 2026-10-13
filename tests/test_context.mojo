@@ -11,8 +11,8 @@ from warp.context import Context
 from warp.runtime import Runtime
 
 
-async def _yield_once(context: Context) -> Int:
-    await context.synchronize()
+__async def _yield_once(context: Context) -> Int:
+    __await context.synchronize()
     return 1
 
 

@@ -35,11 +35,11 @@ def enqueue_square[
     return ctx.enqueue_host_buffer(device_buffer)
 
 
-async def square[
+__async def square[
     size: Int
 ](ctx: Context, input: Array[Float32, size]) raises -> Array[Float32, size]:
     var host_buffer = enqueue_square(ctx, input)
-    await ctx.synchronize()
+    __await ctx.synchronize()
 
     var result = Array[Float32, size](uninitialized=True)
     unsafe_memcpy(

@@ -62,7 +62,7 @@ def _enqueue_square[
 
 
 # `square` is a stand-in kernel: any real device work would do.
-async def square[
+__async def square[
     array_size: Int
 ](ctx: Context, input: Array[Float32, array_size]) raises -> Array[
     Float32, array_size
@@ -70,7 +70,7 @@ async def square[
     var buffer = _enqueue_square[array_size](
         ctx, input.unsafe_ptr().unsafe_origin_cast[ImmutAnyOrigin]()
     )
-    await ctx.synchronize()
+    __await ctx.synchronize()
 
     var result = Array[Float32, array_size](uninitialized=True)
     for i in range(array_size):
