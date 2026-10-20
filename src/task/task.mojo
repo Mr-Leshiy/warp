@@ -54,7 +54,7 @@ struct Task[
 
         self._handle = ArcPointer(_TaskHandle(coro^._take_handle(), callback^))
 
-    def wait(deinit self) raises -> Self.type:
+    def wait(deinit self) -> Self.type:
         """Run the runtime until this task completes, then take its result.
 
         Consumes the task: the hook and the result slot it owns die with it.

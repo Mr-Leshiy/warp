@@ -108,13 +108,13 @@ struct Runtime(Copyable):
         """
         self._inner[].requeue_current(handle)
 
-    def wait(self) raises:
+    def wait(self):
         """Run queued tasks until all have completed, then sync the device."""
         self._inner[].wait()
 
     def block_on[
         type: Deinitable & Movable, origins: OriginSet
-    ](mut self, var handle: Coroutine[type, origins]) raises -> type:
+    ](mut self, var handle: Coroutine[type, origins]) -> type:
         """Run a coroutine to completion and return its result.
 
         Stops as soon as `handle` completes: other queued tasks only run while
@@ -214,7 +214,7 @@ struct _RuntimeInner:
         current[].set_resume_at(frame)
         self.add(current^)
 
-    def wait(mut self) raises:
+    def wait(mut self):
         """Run queued coroutines until all have completed."""
 
         @__parameter
@@ -223,9 +223,8 @@ struct _RuntimeInner:
 
         self.wait_until[never]()
 
-    # TODO: it must not raise any error
     @no_inline
-    def wait_until[predicate: def() thin capturing -> Bool](mut self) raises:
+    def wait_until[predicate: def() thin capturing -> Bool](mut self):
         """Run queued coroutines until `predicate` holds or the queue empties.
 
         Synchronizes the device lazily: once, right before resuming the
@@ -234,7 +233,12 @@ struct _RuntimeInner:
         """
 
         while not predicate() and len(self._q[]) > 0:
-            var handle = self._q[].popleft()
+            var handle: ArcPointer[_TaskHandle]
+            try:
+                handle = self._q[].popleft()
+            except e:
+                # Unreachable: the loop condition checked the queue isn't empty.
+                abort(String("bug: popleft() failed on a non-empty queue: ", e))
             # Saved and restored rather than cleared, in case the coroutine
             # runs a nested `wait_until` (a blocking `wait` on another task).
             var outer = self._current[].copy()
