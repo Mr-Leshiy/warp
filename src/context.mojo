@@ -105,7 +105,7 @@ struct Context(Movable):
         self.gpu_ctx().enqueue_copy(dst_buf=host, src_buf=device)
         return host^
 
-    async def synchronize(self):
+    __async def synchronize(self):
         """Suspend the calling coroutine and re-queue it on the runtime.
 
         This is an async alternative of
@@ -125,5 +125,5 @@ struct Context(Movable):
         _suspend_async(body)
 
 
-async def _synchronize(mut ctx: DeviceContext) raises:
+__async def _synchronize(mut ctx: DeviceContext) raises:
     ctx.synchronize()

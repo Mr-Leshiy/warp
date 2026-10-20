@@ -15,15 +15,15 @@ from warp.runtime import Runtime
 from tests.common import suspend
 
 
-async def _yield_once(runtime: Runtime) -> Int:
-    await suspend(runtime)
+__async def _yield_once(runtime: Runtime) -> Int:
+    __await suspend(runtime)
     return 1
 
 
-async def _yields_twice[VALUE: Int](runtime: Runtime) -> Int:
+__async def _yields_twice[VALUE: Int](runtime: Runtime) -> Int:
     var total = VALUE
-    total += await _yield_once(runtime)
-    total += await _yield_once(runtime)
+    total += __await _yield_once(runtime)
+    total += __await _yield_once(runtime)
     return total
 
 
@@ -45,13 +45,13 @@ def test_tasks_complete_independently() raises:
         assert_equal(second^.wait(), 22)
 
 
-async def _increment_twice(
+__async def _increment_twice(
     runtime: Runtime, counter: Pointer[Int, MutUntrackedOrigin]
 ):
     counter[] += 1
-    await suspend(runtime)
+    __await suspend(runtime)
     counter[] += 1
-    await suspend(runtime)
+    __await suspend(runtime)
 
 
 def test_tasks_make_progress_without_corrupting_shared_state() raises:
@@ -86,7 +86,7 @@ def test_tasks_make_progress_without_corrupting_shared_state() raises:
         assert_equal(counter_ptr[], 6)
 
 
-async def _no_yield(value: Int) -> Int:
+__async def _no_yield(value: Int) -> Int:
     return value
 
 
@@ -108,14 +108,14 @@ def test_mixed_yielding_and_non_yielding_tasks_complete_correctly() raises:
         assert_equal(t4^.wait(), 1)
 
 
-async def _nested_yield[n: Int](runtime: Runtime) -> Int:
+__async def _nested_yield[n: Int](runtime: Runtime) -> Int:
     comptime assert n >= 0
 
     comptime if n == 0:
-        await suspend(runtime)
+        __await suspend(runtime)
         return 1
     else:
-        return 1 + await _nested_yield[n - 1](runtime)
+        return 1 + __await _nested_yield[n - 1](runtime)
 
 
 def test_nested_yielding_tasks() raises:

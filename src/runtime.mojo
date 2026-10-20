@@ -94,12 +94,12 @@ struct Runtime(Copyable):
 
             ```mojo
             @no_inline
-            async def inner(runtime: Runtime) raises -> Int:
-                await suspend(runtime)  # suspends via `runtime.add(hdl)`
+            __async def inner(runtime: Runtime) raises -> Int:
+                __await suspend(runtime)  # suspends via `runtime.add(hdl)`
                 raise Error("failure")
 
-            async def outer(runtime: Runtime) raises -> Int:
-                return await inner(runtime)
+            __async def outer(runtime: Runtime) raises -> Int:
+                return __await inner(runtime)
             ```
 
         Args:
