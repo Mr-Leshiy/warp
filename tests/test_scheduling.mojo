@@ -10,30 +10,31 @@ from max.gpu.host import DeviceContext
 from std.memory import OwnedPointer
 from std.testing import TestSuite, assert_equal, assert_true
 
+from warp.context import Context
 from warp.runtime import Runtime
 
 from tests.common import suspend
 
 
-async def _yield_once(runtime: Runtime) -> Int:
-    await suspend(runtime)
+async def _yield_once(ctx: Context) -> Int:
+    await suspend(ctx)
     return 1
 
 
-async def _yields_twice[VALUE: Int](runtime: Runtime) -> Int:
+async def _yields_twice[VALUE: Int](ctx: Context) -> Int:
     var total = VALUE
-    total += await _yield_once(runtime)
-    total += await _yield_once(runtime)
+    total += await _yield_once(ctx)
+    total += await _yield_once(ctx)
     return total
 
 
 def test_tasks_complete_independently() raises:
     with DeviceContext() as ctx:
         var runtime = Runtime(ctx)
-        var shared = runtime.copy()
+        var context = runtime.context()
 
-        var first = runtime.add(_yields_twice[10](shared))
-        var second = runtime.add(_yields_twice[20](shared))
+        var first = runtime.add(_yields_twice[10](context))
+        var second = runtime.add(_yields_twice[20](context))
 
         runtime.wait()
 
@@ -46,18 +47,18 @@ def test_tasks_complete_independently() raises:
 
 
 async def _increment_twice(
-    runtime: Runtime, counter: Pointer[Int, MutUntrackedOrigin]
+    ctx: Context, counter: Pointer[Int, MutUntrackedOrigin]
 ):
     counter[] += 1
-    await suspend(runtime)
+    await suspend(ctx)
     counter[] += 1
-    await suspend(runtime)
+    await suspend(ctx)
 
 
 def test_tasks_make_progress_without_corrupting_shared_state() raises:
     with DeviceContext() as ctx:
         var runtime = Runtime(ctx)
-        var shared = runtime.copy()
+        var context = runtime.context()
 
         # `counter` has to live behind a pointer, not as a bare local:
         # it's read and written from three coroutines reached through
@@ -67,9 +68,9 @@ def test_tasks_make_progress_without_corrupting_shared_state() raises:
         var counter = OwnedPointer(0)
         var counter_ptr = counter.ptr().unsafe_origin_cast[MutUntrackedOrigin]()
 
-        var t1 = runtime.add(_increment_twice(shared, counter_ptr))
-        var t2 = runtime.add(_increment_twice(shared, counter_ptr))
-        var t3 = runtime.add(_increment_twice(shared, counter_ptr))
+        var t1 = runtime.add(_increment_twice(context, counter_ptr))
+        var t2 = runtime.add(_increment_twice(context, counter_ptr))
+        var t3 = runtime.add(_increment_twice(context, counter_ptr))
 
         runtime.wait()
 
@@ -93,12 +94,12 @@ async def _no_yield(value: Int) -> Int:
 def test_mixed_yielding_and_non_yielding_tasks_complete_correctly() raises:
     with DeviceContext() as ctx:
         var runtime = Runtime(ctx)
-        var shared = runtime.copy()
+        var context = runtime.context()
 
         var t1 = runtime.add(_no_yield(10))
-        var t2 = runtime.add(_yield_once(shared))
+        var t2 = runtime.add(_yield_once(context))
         var t3 = runtime.add(_no_yield(20))
-        var t4 = runtime.add(_yield_once(shared))
+        var t4 = runtime.add(_yield_once(context))
 
         runtime.wait()
 
@@ -108,26 +109,26 @@ def test_mixed_yielding_and_non_yielding_tasks_complete_correctly() raises:
         assert_equal(t4^.wait(), 1)
 
 
-async def _nested_yield[n: Int](runtime: Runtime) -> Int:
+async def _nested_yield[n: Int](ctx: Context) -> Int:
     comptime assert n >= 0
 
     comptime if n == 0:
-        await suspend(runtime)
+        await suspend(ctx)
         return 1
     else:
-        return 1 + await _nested_yield[n - 1](runtime)
+        return 1 + await _nested_yield[n - 1](ctx)
 
 
 def test_nested_yielding_tasks() raises:
     with DeviceContext() as ctx:
         var runtime = Runtime(ctx)
-        var shared = runtime.copy()
+        var context = runtime.context()
 
         # Each task parks at the bottom of its chain, so resuming it has to
         # unwind back up through every enclosing frame. Two tasks of
         # different depths run side by side on one runtime.
-        var deep = runtime.add(_nested_yield[16](shared.copy()))
-        var shallow = runtime.add(_nested_yield[3](shared.copy()))
+        var deep = runtime.add(_nested_yield[16](context))
+        var shallow = runtime.add(_nested_yield[3](context))
 
         runtime.wait()
 

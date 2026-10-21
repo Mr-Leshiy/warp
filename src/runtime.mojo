@@ -75,39 +75,6 @@ struct Runtime(Copyable):
         task = RaisingTask(handle^, self._inner.copy())
         self._inner[].add(task.handle())
 
-    def add(self, handle: AnyCoroutine):
-        """Re-queue the running task, to resume from a frame of it that just
-        suspended.
-
-        Must be called from a suspend body, while this runtime is running
-        the task that `handle` belongs to; aborts otherwise.
-
-        Note:
-            A suspend body that only calls this is straight-line code, which
-            can trigger a compiler crash
-            (https://github.com/modular/modular/issues/7257): a small `raises`
-            coroutine that suspends this way gets inlined into the `raises`
-            coroutine awaiting it, and lowering fails with
-            `'pop.cast_from_builtin' op cannot convert to scalar dtype bool`.
-            To work around it on the caller side, mark the awaited `raises`
-            coroutine `@no_inline`:
-
-            ```mojo
-            @no_inline
-            async def inner(runtime: Runtime) raises -> Int:
-                await suspend(runtime)  # suspends via `runtime.add(hdl)`
-                raise Error("failure")
-
-            async def outer(runtime: Runtime) raises -> Int:
-                return await inner(runtime)
-            ```
-
-        Args:
-            handle: The suspended frame: the task's own coroutine or one it's
-                awaiting. The task keeps ownership of it.
-        """
-        self._inner[].requeue_current(handle)
-
     def wait(self) raises:
         """Run queued tasks until all have completed, then sync the device."""
         self._inner[].wait()
