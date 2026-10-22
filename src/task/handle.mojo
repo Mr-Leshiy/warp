@@ -76,6 +76,15 @@ struct _TaskHandle(Movable):
         """
         self._resume_at = frame
 
+    def addr(self) -> String:
+        """Return the address of the task's own coroutine frame, for logging."""
+        return _coroutine_address(self._handle)
+
+    def resume_addr(self) -> String:
+        """Return the address of the frame the next resume picks up in, for
+        logging."""
+        return _coroutine_address(self._resume_at)
+
     def resume_coroutine(self):
         """Resume the task from the frame it last suspended in."""
         _coro_resume_fn(self._resume_at)
@@ -99,3 +108,17 @@ def _hook_deinit[
     var ptr = hook.unsafe_bitcast[_CompletionHook[CallbackPayload]]()
     ptr.unsafe_deinit_pointee()
     ptr.unsafe_free()
+
+
+def _coroutine_address(hdl: AnyCoroutine) -> String:
+    """Return the address of a coroutine handle, for logging.
+
+    `AnyCoroutine` is an opaque MLIR type, not a pointer, so there's no
+    direct way to read its bits. Taking a `Pointer` to the local `hdl` and
+    reinterpreting *that* as a `Pointer[Int]` gives a view onto the same
+    (pointer-sized) bytes, which can then be read as an address.
+
+    Args:
+        hdl: The coroutine handle to return the address of.
+    """
+    return hex(UInt64(Pointer(to=hdl).unsafe_bitcast[Int]()[]))
