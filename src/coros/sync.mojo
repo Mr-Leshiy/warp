@@ -15,7 +15,7 @@ def _spawn_synchronize_coro(runtime: ArcPointer[_RuntimeInner]):
         runtime: The runtime whose device to synchronize.
     """
 
-    async def _synchronize(mut ctx: DeviceContext) raises:
+    __async def _synchronize(mut ctx: DeviceContext) raises:
         ctx.synchronize()
 
     # Clears the flag once the sync finishes, so the next sync request

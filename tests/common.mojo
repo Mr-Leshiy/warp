@@ -5,7 +5,7 @@ from std.builtin._coroutine import AnyCoroutine, _suspend_async
 from warp.context import Context
 
 
-async def suspend(ctx: Context):
+__async def suspend(ctx: Context):
     """Suspend the calling coroutine and re-queue it on `ctx`'s runtime.
 
     A plain yield point for tests that only need a coroutine to give up

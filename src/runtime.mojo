@@ -191,7 +191,6 @@ struct _RuntimeInner:
         self.wait_until[never]()
 
     # TODO: it must not raise any error
-    @no_inline
     def wait_until[predicate: def() thin capturing -> Bool](mut self) raises:
         """Run queued coroutines until `predicate` holds or the queue empties.
 

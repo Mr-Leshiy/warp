@@ -11,7 +11,7 @@ from warp.runtime import Runtime
 from tests.common import suspend
 
 
-async def _raises_immediately() raises -> Int:
+__async def _raises_immediately() raises -> Int:
     raise Error("immediate failure")
 
 
@@ -23,9 +23,9 @@ def test_raising_task_raises_immediately() raises:
             _ = task^.wait()
 
 
-async def _raises_after_yields(ctx: Context) raises -> Int:
-    await suspend(ctx)
-    await suspend(ctx)
+__async def _raises_after_yields(ctx: Context) raises -> Int:
+    __await suspend(ctx)
+    __await suspend(ctx)
     raise Error("failure after yields")
 
 
@@ -38,15 +38,15 @@ def test_raising_task_raises_after_yields() raises:
             _ = task^.wait()
 
 
-async def _raises_from_nested_coroutine(ctx: Context) raises -> Int:
+__async def _raises_from_nested_coroutine(ctx: Context) raises -> Int:
     # TODO: remove `@no_inline` once
     # https://github.com/modular/modular/issues/7257 is resolved.
     @no_inline
-    async def _raises_inner(ctx: Context) raises -> Int:
-        await suspend(ctx)
+    __async def _raises_inner(ctx: Context) raises -> Int:
+        __await suspend(ctx)
         raise Error("nested failure")
 
-    return await _raises_inner(ctx)
+    return __await _raises_inner(ctx)
 
 
 def test_raising_task_raises_from_nested_coroutine() raises:

@@ -16,15 +16,15 @@ from warp.runtime import Runtime
 from tests.common import suspend
 
 
-async def _yield_once(ctx: Context) -> Int:
-    await suspend(ctx)
+__async def _yield_once(ctx: Context) -> Int:
+    __await suspend(ctx)
     return 1
 
 
-async def _yields_twice[VALUE: Int](ctx: Context) -> Int:
+__async def _yields_twice[VALUE: Int](ctx: Context) -> Int:
     var total = VALUE
-    total += await _yield_once(ctx)
-    total += await _yield_once(ctx)
+    total += __await _yield_once(ctx)
+    total += __await _yield_once(ctx)
     return total
 
 
@@ -57,10 +57,10 @@ def test_task_wait_returns_its_result() raises:
         assert_equal(second^.wait(), 12)
 
 
-async def _yield_n_times(ctx: Context, n: Int) -> Int:
+__async def _yield_n_times(ctx: Context, n: Int) -> Int:
     var i = 0
     while i < n:
-        await suspend(ctx)
+        __await suspend(ctx)
         i += 1
     return n
 

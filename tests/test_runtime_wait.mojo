@@ -9,7 +9,7 @@ from warp.runtime import Runtime
 # than once, a runtime torn down before draining), not any particular
 # task shape. A non-yielding task keeps that decoupled from `Context` and
 # its one suspend point, `Context.synchronize()`.
-async def _no_yield(value: Int) -> Int:
+__async def _no_yield(value: Int) -> Int:
     return value
 
 
