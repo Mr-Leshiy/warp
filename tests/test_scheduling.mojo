@@ -138,5 +138,41 @@ def test_nested_yielding_tasks() raises:
         assert_equal(shallow^.wait(), 4)
 
 
+__async def _suspends_twice(ctx: Context) -> Int:
+    # The prints are load-bearing: without work between the two
+    # suspensions the bug doesn't show up.
+    __await suspend(ctx)
+    print("after suspend 1")
+    __await suspend(ctx)
+    print("after suspend 2")
+    return 2
+
+
+__async def _awaits_suspends_twice(ctx: Context) -> Int:
+    return __await _suspends_twice(ctx)
+
+
+def test_awaited_coroutine_suspending_twice() raises:
+    with DeviceContext() as ctx:
+        var runtime = Runtime(ctx)
+        var context = runtime.context()
+
+        # Reproduces https://github.com/modular/modular/issues/7368: the
+        # awaited `_suspends_twice` (a hot-ramp coroutine) suspends twice,
+        # but its `_resume` never stores the next state before the second
+        # suspension, so every resume restarts after the first one ("after
+        # suspend 1" forever) and this test hangs until that's fixed.
+        var task = runtime.add(_awaits_suspends_twice(context))
+
+        runtime.wait()
+
+        assert_true(task.is_completed())
+        assert_equal(task^.wait(), 2)
+
+
 def main() raises:
-    TestSuite.discover_tests[__functions_in_module()]().run()
+    var suite = TestSuite.discover_tests[__functions_in_module()]()
+    # TODO: stop skipping once https://github.com/modular/modular/issues/7368
+    # is resolved; until then this test hangs.
+    suite.skip[test_awaited_coroutine_suspending_twice]()
+    suite^.run()
