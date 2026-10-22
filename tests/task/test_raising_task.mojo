@@ -5,6 +5,7 @@ immediately, after suspending, or from a nested coroutine.
 from max.gpu.host import DeviceContext
 from std.testing import TestSuite, assert_raises
 
+from warp.context import Context
 from warp.runtime import Runtime
 
 from tests.common import suspend
@@ -22,37 +23,37 @@ def test_raising_task_raises_immediately() raises:
             _ = task^.wait()
 
 
-__async def _raises_after_yields(runtime: Runtime) raises -> Int:
-    __await suspend(runtime)
-    __await suspend(runtime)
+__async def _raises_after_yields(ctx: Context) raises -> Int:
+    __await suspend(ctx)
+    __await suspend(ctx)
     raise Error("failure after yields")
 
 
 def test_raising_task_raises_after_yields() raises:
     with DeviceContext() as ctx:
         var runtime = Runtime(ctx)
-        var shared = runtime.copy()
-        var task = runtime.add(_raises_after_yields(shared))
+        var context = runtime.context()
+        var task = runtime.add(_raises_after_yields(context))
         with assert_raises(contains="failure after yields"):
             _ = task^.wait()
 
 
-__async def _raises_from_nested_coroutine(runtime: Runtime) raises -> Int:
+__async def _raises_from_nested_coroutine(ctx: Context) raises -> Int:
     # TODO: remove `@no_inline` once
     # https://github.com/modular/modular/issues/7257 is resolved.
     @no_inline
-    __async def _raises_inner(runtime: Runtime) raises -> Int:
-        __await suspend(runtime)
+    __async def _raises_inner(ctx: Context) raises -> Int:
+        __await suspend(ctx)
         raise Error("nested failure")
 
-    return __await _raises_inner(runtime)
+    return __await _raises_inner(ctx)
 
 
 def test_raising_task_raises_from_nested_coroutine() raises:
     with DeviceContext() as ctx:
         var runtime = Runtime(ctx)
-        var shared = runtime.copy()
-        var task = runtime.add(_raises_from_nested_coroutine(shared))
+        var context = runtime.context()
+        var task = runtime.add(_raises_from_nested_coroutine(context))
         with assert_raises(contains="nested failure"):
             _ = task^.wait()
 
@@ -70,8 +71,8 @@ def test_raising_task_runtime_wait_raises_immediately() raises:
 def test_raising_task_runtime_wait_raises_after_yields() raises:
     with DeviceContext() as ctx:
         var runtime = Runtime(ctx)
-        var shared = runtime.copy()
-        var task = runtime.add(_raises_after_yields(shared))
+        var context = runtime.context()
+        var task = runtime.add(_raises_after_yields(context))
 
         runtime.wait()
         with assert_raises(contains="failure after yields"):
@@ -81,8 +82,8 @@ def test_raising_task_runtime_wait_raises_after_yields() raises:
 def test_raising_task_runtime_wait_raises_from_nested_coroutine() raises:
     with DeviceContext() as ctx:
         var runtime = Runtime(ctx)
-        var shared = runtime.copy()
-        var task = runtime.add(_raises_from_nested_coroutine(shared))
+        var context = runtime.context()
+        var task = runtime.add(_raises_from_nested_coroutine(context))
 
         runtime.wait()
         with assert_raises(contains="nested failure"):
