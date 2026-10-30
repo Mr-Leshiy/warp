@@ -15,6 +15,7 @@ struct TypeId(Equatable, ImplicitlyCopyable, Writable):
     # `reflect[T].name()` leaves standard library types unqualified
     # (`List[String]`).
     var _id: UInt64
+    """Hash of the type's reflected name."""
 
     @staticmethod
     def of[T: AnyType]() -> Self:
@@ -28,4 +29,8 @@ struct TypeId(Equatable, ImplicitlyCopyable, Writable):
         return self._id == other._id
 
     def write_to(self, mut writer: Some[Writer]):
+        """Write the id as `TypeId(<hash>)`, for logging.
+
+        Only the hash is kept, so the type's name can't be recovered here.
+        """
         writer.write("TypeId(", self._id, ")")
