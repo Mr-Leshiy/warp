@@ -1,5 +1,6 @@
 from std.atomic import Atomic
 from std.collections.optional import Optional
+from std.memory.owned_pointer import OwnedPointer
 from std.os import abort
 
 from std.builtin._coroutine import AnyCoroutine
@@ -16,10 +17,8 @@ comptime CompletionCallbackFn[CallbackPayload: Movable & Deinitable] = def(
 """The function a `CompletionCallback` calls with its payload."""
 
 
-comptime _CompletionHookPtr[CallbackPayload: Movable & Deinitable] = Pointer[
-    _CompletionHook[CallbackPayload], MutUntrackedOrigin
-]
-"""Pointer to a task's completion hook, as the coroutine frame holds it."""
+comptime _CompletionStatePtr = Pointer[_CompletionState, MutUntrackedOrigin]
+"""Pointer to a task's completion state, as the coroutine frame holds it."""
 
 
 struct CompletionCallback[CallbackPayload: Movable & Deinitable = NoneType](
@@ -72,23 +71,22 @@ struct CompletionCallback[CallbackPayload: Movable & Deinitable = NoneType](
         self.function(self.payload)
 
 
-struct _CompletionHook[CallbackPayload: Movable & Deinitable](Movable):
-    """What a task's coroutine runs on completion: an optional user callback,
-    then raising the completed flag.
+struct _CompletionState(Movable):
+    """Whether a task's coroutine has completed, and the user callback, if
+    any, still to run when it does.
 
-    Lives on the heap, owned by a `_TaskHandle`.
+    The coroutine frame's completion hook, `_on_completion`, runs the
+    callback and then raises the flag. Lives on the heap, owned by a
+    `_TaskHandle`.
     """
 
-    # Must stay the first field: `_TaskHandle` reads it without knowing
-    # `CallbackPayload`.
     var completed: _COMPLETED_FLAG_TYPE
-    var callback: Optional[CompletionCallback[Self.CallbackPayload]]
+    var callback: Optional[ErasedOwnedPointer]
+    """The `CompletionCallback`, its payload type erased: only
+    `_on_completion`, installed alongside it, knows that type."""
 
-    def __init__(
-        out self,
-        var callback: Optional[CompletionCallback[Self.CallbackPayload]],
-    ):
-        """Initialize a hook with the flag cleared.
+    def __init__(out self, var callback: Optional[ErasedOwnedPointer]):
+        """Initialize a state with the flag cleared.
 
         Args:
             callback: Run on completion, before the flag is set. Ownership is
@@ -102,51 +100,57 @@ struct _CompletionHook[CallbackPayload: Movable & Deinitable](Movable):
         return self.completed.load() != 0
 
 
-def _allocate_completion_hook[
+def _allocate_completion_state[
     CallbackPayload: Movable & Deinitable
 ](
     handle: AnyCoroutine,
     var callback: Optional[CompletionCallback[CallbackPayload]],
-) -> ErasedOwnedPointer:
-    """Allocate a completion hook on the heap and install it in a task
-    coroutine's frame.
+) -> OwnedPointer[_CompletionState]:
+    """Allocate a completion state on the heap and install it, with its
+    completion hook, in a task coroutine's frame.
 
     Takes the raw coroutine handle, so it works for a `Task`'s `Coroutine` or
     a `RaisingTask`'s `RaisingCoroutine` alike.
 
     Args:
         handle: The coroutine.
-        callback: Called once the coroutine completes, before the hook reads
+        callback: Called once the coroutine completes, before the state reads
             as completed. Ownership is transferred.
 
     Returns:
-        The hook, its payload type erased. Keep it alive for as long as the
-        coroutine may complete.
+        The state. Keep it alive for as long as the coroutine may complete.
     """
 
-    def _on_completion(hook: _CompletionHookPtr[CallbackPayload]):
+    def _on_completion(state: _CompletionStatePtr):
         # The callback runs first, so by the time the flag reads as set,
         # it has already finished.
-        if hook[].callback:
-            hook[].callback.value()()
-        hook[].completed.store(1)
+        if state[].callback:
+            _completion_callback[CallbackPayload](state[].callback.value())[]()
+        state[].completed.store(1)
 
-    var hook = ErasedOwnedPointer(_CompletionHook(callback^))
+    var erased = Optional[ErasedOwnedPointer]()
+    if callback:
+        erased = ErasedOwnedPointer(callback.take())
+    var state = OwnedPointer(_CompletionState(erased^))
 
-    var ctx = _get_ctx[_CompletionHookPtr[CallbackPayload]](handle)
+    var ctx = _get_ctx[_CompletionStatePtr](handle)
     ctx[].callback = _on_completion
-    ctx[].payload = _completion_hook_ptr[CallbackPayload](hook)
-    return hook^
+    ctx[].payload = Pointer(to=state[]).unsafe_origin_cast[MutUntrackedOrigin]()
+    return state^
 
 
-def _completion_hook_ptr[
+def _completion_callback[
     CallbackPayload: Movable & Deinitable
-](hook: ErasedOwnedPointer) -> _CompletionHookPtr[CallbackPayload]:
-    """Return the typed hook behind a pointer from `_allocate_completion_hook`.
+](callback: ErasedOwnedPointer) -> Pointer[
+    CompletionCallback[CallbackPayload], MutUntrackedOrigin
+]:
+    """Return the typed callback behind a `_CompletionState`'s erased one.
 
-    Aborts if `hook` doesn't hold a `_CompletionHook[CallbackPayload]`.
+    Aborts if `callback` doesn't hold a `CompletionCallback[CallbackPayload]`:
+    `_allocate_completion_state` installs the two together, so that would be
+    a bug.
     """
     try:
-        return hook.get[_CompletionHook[CallbackPayload]]()
+        return callback.get[CompletionCallback[CallbackPayload]]()
     except e:
-        abort(String("bug: not a completion hook: ", e))
+        abort(String("bug: not a completion callback: ", e))

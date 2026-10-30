@@ -8,20 +8,20 @@ from std.builtin._coroutine import (
     _coro_destroy_fn,
 )
 from std.collections.optional import Optional
+from std.memory.owned_pointer import OwnedPointer
 
 from .completion import (
     CompletionCallback,
-    _COMPLETED_FLAG_TYPE,
-    _allocate_completion_hook,
+    _CompletionState,
+    _allocate_completion_state,
 )
-from ..utils import ErasedOwnedPointer
 
 
 struct _TaskHandle(Movable):
-    """A task's coroutine and its completion hook.
+    """A task's coroutine and its completion state.
 
     Has no type parameters, so the handles of any tasks fit in one `List` or
-    queue. The hook lives on the heap, owned by this handle, at the address
+    queue. The state lives on the heap, owned by this handle, at the address
     the coroutine frame points at — so the handle itself is free to move.
     """
 
@@ -29,8 +29,8 @@ struct _TaskHandle(Movable):
     var _resume_at: AnyCoroutine
     """The frame to resume next: the task's own coroutine, or one it's
     awaiting that suspended (see `set_resume_at`)."""
-    var _hook: ErasedOwnedPointer
-    """The heap-allocated `_CompletionHook`, its payload type erased."""
+    var _state: OwnedPointer[_CompletionState]
+    """The heap-allocated completion state the coroutine frame points at."""
 
     def __init__[
         CallbackPayload: Movable & Deinitable = NoneType,
@@ -39,7 +39,7 @@ struct _TaskHandle(Movable):
         var coro_handle: AnyCoroutine,
         var callback: Optional[CompletionCallback[CallbackPayload]],
     ):
-        """Take ownership of a coroutine and install its completion hook.
+        """Take ownership of a coroutine and install its completion state.
 
         Its result slot must already be set (`_set_result_slot`).
 
@@ -50,10 +50,10 @@ struct _TaskHandle(Movable):
         """
         self._handle = coro_handle
         self._resume_at = self._handle
-        self._hook = _allocate_completion_hook(self._handle, callback^)
+        self._state = _allocate_completion_state(self._handle, callback^)
 
     def __deinit__(deinit self):
-        """Destroy the coroutine; its completion hook is freed after it."""
+        """Destroy the coroutine; its completion state is freed after it."""
         _coro_destroy_fn(self._handle)
 
     def set_resume_at(mut self, frame: AnyCoroutine):
@@ -91,13 +91,7 @@ struct _TaskHandle(Movable):
     def is_completed(self) -> Bool:
         """Return True once the coroutine has run to completion and its
         callback, if any, has run."""
-        # The flag is `_CompletionHook`'s first field, so it can be read
-        # without knowing the hook's payload type.
-        # TODO: stop relying on field layout: Mojo doesn't guarantee fields
-        # stay in declaration order, and nothing enforces the flag staying
-        # first. Capture the typed read in `__init__` instead (a pointer to
-        # the flag, or a `_hook_is_completed[CallbackPayload]` function).
-        return self._hook.unsafe_get[_COMPLETED_FLAG_TYPE]()[].load() != 0
+        return self._state[].is_completed()
 
 
 def _coroutine_address(hdl: AnyCoroutine) -> String:
