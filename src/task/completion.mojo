@@ -21,79 +21,54 @@ comptime _CompletionStatePtr = Pointer[_CompletionState, MutUntrackedOrigin]
 """Pointer to a task's completion state, as the coroutine frame holds it."""
 
 
-struct CompletionCallback(Movable):
+struct CompletionCallback[CallbackPayload: Movable & Deinitable = NoneType](
+    Movable
+):
     """A function a task calls once its coroutine completes, together with
     the payload it's called with: a hand-built closure.
 
     `CompletionCallbackFn` is `thin`, so it can't capture anything; the
     payload stands in for its captures. The callback owns it, so e.g. an
     `ArcPointer` payload keeps its pointee alive until the callback is
-    dropped.
+    dropped. Leave `CallbackPayload` as `NoneType` for a callback that needs
+    no state.
 
-    The payload's type is erased: it's fixed when the callback is built, so
-    neither the callback nor the task it's handed to is parameterized on it.
+    Parameters:
+        CallbackPayload: The type of the state passed to the function.
     """
 
-    var _closure: ErasedOwnedPointer
-    """The heap-allocated `_TypedCallback`, its payload type erased."""
-    var _call: def(ErasedOwnedPointer) thin -> None
-    """Calls `_closure`; the one operation that needs its payload type."""
+    var function: CompletionCallbackFn[Self.CallbackPayload]
+    var payload: Self.CallbackPayload
 
-    def __init__[
-        CallbackPayload: Movable & Deinitable
-    ](
+    def __init__(
         out self,
-        function: CompletionCallbackFn[CallbackPayload],
-        var payload: CallbackPayload,
+        function: CompletionCallbackFn[Self.CallbackPayload],
+        var payload: Self.CallbackPayload,
     ):
         """Initialize a callback.
-
-        Parameters:
-            CallbackPayload: The type of the state passed to `function`.
 
         Args:
             function: The function to call.
             payload: Passed to `function` when it's called. Ownership is
                 transferred.
         """
-        self._closure = ErasedOwnedPointer(_TypedCallback(function, payload^))
-        self._call = _call_typed_callback[CallbackPayload]
+        self.function = function
+        self.payload = payload^
 
-    def __init__(out self, function: CompletionCallbackFn[NoneType]):
+    def __init__(
+        out self, function: CompletionCallbackFn[Self.CallbackPayload]
+    ) where Self.CallbackPayload == NoneType:
         """Initialize a callback that needs no state.
 
         Args:
             function: The function to call, with `None`.
         """
-        self = Self(function, None)
+        self.function = function
+        self.payload = rebind_var[Self.CallbackPayload](None)
 
     def __call__(self):
-        """Call the function with its payload."""
-        self._call(self._closure)
-
-
-@fieldwise_init
-struct _TypedCallback[CallbackPayload: Movable & Deinitable](Movable):
-    """What a `CompletionCallback` erases: the function and its payload, with
-    the payload's type still known."""
-
-    var function: CompletionCallbackFn[Self.CallbackPayload]
-    var payload: Self.CallbackPayload
-
-
-def _call_typed_callback[
-    CallbackPayload: Movable & Deinitable
-](closure: ErasedOwnedPointer):
-    """Call the `_TypedCallback[CallbackPayload]` behind `closure`.
-
-    Aborts if `closure` holds anything else: `CompletionCallback` pairs the
-    two, so that would be a bug.
-    """
-    try:
-        ref callback = closure.get[_TypedCallback[CallbackPayload]]()[]
-        callback.function(callback.payload)
-    except e:
-        abort(String("bug: not a completion callback: ", e))
+        """Call `function` with `payload`."""
+        self.function(self.payload)
 
 
 struct _CompletionState(Movable):
@@ -106,9 +81,11 @@ struct _CompletionState(Movable):
     """
 
     var completed: _COMPLETED_FLAG_TYPE
-    var callback: Optional[CompletionCallback]
+    var callback: Optional[ErasedOwnedPointer]
+    """The `CompletionCallback`, its payload type erased: only
+    `_on_completion`, installed alongside it, knows that type."""
 
-    def __init__(out self, var callback: Optional[CompletionCallback]):
+    def __init__(out self, var callback: Optional[ErasedOwnedPointer]):
         """Initialize a state with the flag cleared.
 
         Args:
@@ -123,9 +100,11 @@ struct _CompletionState(Movable):
         return self.completed.load() != 0
 
 
-def _allocate_completion_state(
+def _allocate_completion_state[
+    CallbackPayload: Movable & Deinitable
+](
     handle: AnyCoroutine,
-    var callback: Optional[CompletionCallback],
+    var callback: Optional[CompletionCallback[CallbackPayload]],
 ) -> OwnedPointer[_CompletionState]:
     """Allocate a completion state on the heap and install it, with its
     completion hook, in a task coroutine's frame.
@@ -146,12 +125,32 @@ def _allocate_completion_state(
         # The callback runs first, so by the time the flag reads as set,
         # it has already finished.
         if state[].callback:
-            state[].callback.value()()
+            _completion_callback[CallbackPayload](state[].callback.value())[]()
         state[].completed.store(1)
 
-    var state = OwnedPointer(_CompletionState(callback^))
+    var erased = Optional[ErasedOwnedPointer]()
+    if callback:
+        erased = ErasedOwnedPointer(callback.take())
+    var state = OwnedPointer(_CompletionState(erased^))
 
     var ctx = _get_ctx[_CompletionStatePtr](handle)
     ctx[].callback = _on_completion
     ctx[].payload = Pointer(to=state[]).unsafe_origin_cast[MutUntrackedOrigin]()
     return state^
+
+
+def _completion_callback[
+    CallbackPayload: Movable & Deinitable
+](callback: ErasedOwnedPointer) -> Pointer[
+    CompletionCallback[CallbackPayload], MutUntrackedOrigin
+]:
+    """Return the typed callback behind a `_CompletionState`'s erased one.
+
+    Aborts if `callback` doesn't hold a `CompletionCallback[CallbackPayload]`:
+    `_allocate_completion_state` installs the two together, so that would be
+    a bug.
+    """
+    try:
+        return callback.get[CompletionCallback[CallbackPayload]]()
+    except e:
+        abort(String("bug: not a completion callback: ", e))

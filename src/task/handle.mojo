@@ -32,10 +32,12 @@ struct _TaskHandle(Movable):
     var _state: OwnedPointer[_CompletionState]
     """The heap-allocated completion state the coroutine frame points at."""
 
-    def __init__(
+    def __init__[
+        CallbackPayload: Movable & Deinitable = NoneType,
+    ](
         out self,
         var coro_handle: AnyCoroutine,
-        var callback: Optional[CompletionCallback],
+        var callback: Optional[CompletionCallback[CallbackPayload]],
     ):
         """Take ownership of a coroutine and install its completion state.
 
