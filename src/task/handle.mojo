@@ -12,16 +12,16 @@ from std.memory.owned_pointer import OwnedPointer
 
 from .completion import (
     CompletionCallback,
-    _CompletionHook,
-    _allocate_completion_hook,
+    _CompletionState,
+    _allocate_completion_state,
 )
 
 
 struct _TaskHandle(Movable):
-    """A task's coroutine and its completion hook.
+    """A task's coroutine and its completion state.
 
     Has no type parameters, so the handles of any tasks fit in one `List` or
-    queue. The hook lives on the heap, owned by this handle, at the address
+    queue. The state lives on the heap, owned by this handle, at the address
     the coroutine frame points at — so the handle itself is free to move.
     """
 
@@ -29,15 +29,15 @@ struct _TaskHandle(Movable):
     var _resume_at: AnyCoroutine
     """The frame to resume next: the task's own coroutine, or one it's
     awaiting that suspended (see `set_resume_at`)."""
-    var _hook: OwnedPointer[_CompletionHook]
-    """The heap-allocated completion hook the coroutine frame points at."""
+    var _state: OwnedPointer[_CompletionState]
+    """The heap-allocated completion state the coroutine frame points at."""
 
     def __init__(
         out self,
         var coro_handle: AnyCoroutine,
         var callback: Optional[CompletionCallback],
     ):
-        """Take ownership of a coroutine and install its completion hook.
+        """Take ownership of a coroutine and install its completion state.
 
         Its result slot must already be set (`_set_result_slot`).
 
@@ -48,10 +48,10 @@ struct _TaskHandle(Movable):
         """
         self._handle = coro_handle
         self._resume_at = self._handle
-        self._hook = _allocate_completion_hook(self._handle, callback^)
+        self._state = _allocate_completion_state(self._handle, callback^)
 
     def __deinit__(deinit self):
-        """Destroy the coroutine; its completion hook is freed after it."""
+        """Destroy the coroutine; its completion state is freed after it."""
         _coro_destroy_fn(self._handle)
 
     def set_resume_at(mut self, frame: AnyCoroutine):
@@ -89,7 +89,7 @@ struct _TaskHandle(Movable):
     def is_completed(self) -> Bool:
         """Return True once the coroutine has run to completion and its
         callback, if any, has run."""
-        return self._hook[].is_completed()
+        return self._state[].is_completed()
 
 
 def _coroutine_address(hdl: AnyCoroutine) -> String:

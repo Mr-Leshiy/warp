@@ -32,7 +32,7 @@ struct RaisingTask[
         """Initialize a task with a raising coroutine.
 
         Takes ownership of the provided coroutine and points it at this
-        task's result slot, error slot, and completion hook.
+        task's result slot, error slot, and completion state.
 
         Args:
             coro: The raising coroutine to execute as a task. Ownership is
@@ -61,7 +61,7 @@ struct RaisingTask[
     def wait(deinit self) raises -> Self.type:
         """Run the runtime until this task completes, then take its result.
 
-        Consumes the task: the hook and the result/error slots it owns die
+        Consumes the task: the completion state and the result/error slots it owns die
         with it.
 
         Raises:
@@ -75,7 +75,7 @@ struct RaisingTask[
         self._runtime[].wait_until[completed]()
 
         # `has_error` reading `_handle` here is also what keeps it — and the
-        # hook `completed` reads — alive through the wait above.
+        # completion state `completed` reads — alive through the wait above.
         if self._handle[].has_error():
             # `_result` was never written in this case — don't run its
             # destructor over the uninitialized bytes sitting there.
@@ -96,7 +96,7 @@ struct RaisingTask[
 
     def handle(self) -> ArcPointer[_TaskHandle]:
         """Return a new reference to this task's coroutine and completion
-        hook.
+        state.
 
         Returns:
             The shared task handle, for queueing on a runtime.

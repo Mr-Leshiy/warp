@@ -30,7 +30,7 @@ struct Task[
         """Initialize a task with a coroutine.
 
         Takes ownership of the provided coroutine and points it at this task's
-        result slot and completion hook.
+        result slot and completion state.
 
         Args:
             coro: The coroutine to execute as a task. Ownership is
@@ -56,7 +56,7 @@ struct Task[
     def wait(deinit self) -> Self.type:
         """Run the runtime until this task completes, then take its result.
 
-        Consumes the task: the hook and the result slot it owns die with it.
+        Consumes the task: the completion state and the result slot it owns die with it.
         """
 
         @__parameter
@@ -77,7 +77,7 @@ struct Task[
 
     def handle(self) -> ArcPointer[_TaskHandle]:
         """Return a new reference to this task's coroutine and completion
-        hook.
+        state.
 
         Returns:
             The shared task handle, for queueing on a runtime.
