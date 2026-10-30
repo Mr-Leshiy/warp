@@ -9,11 +9,6 @@ struct TypeId(Equatable, ImplicitlyCopyable, Writable):
     unequal.
     """
 
-    # TODO: hash the type's full structure instead of its name: its path, its
-    # generic arguments, and the package it's defined in, so two otherwise
-    # identical types from different packages or scopes never share an id.
-    # `reflect[T].name()` leaves standard library types unqualified
-    # (`List[String]`).
     var _id: UInt64
     """Hash of the type's reflected name."""
 
