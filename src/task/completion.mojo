@@ -1,9 +1,10 @@
 from std.atomic import Atomic
 from std.collections.optional import Optional
-from std.memory.owned_pointer import OwnedPointer
+from std.os import abort
 
 from std.builtin._coroutine import AnyCoroutine
 
+from ..utils import ErasedOwnedPointer
 from .context import _CoroutineContextCallbackFn, _get_ctx
 
 comptime _COMPLETED_FLAG_TYPE = Atomic[Scalar[DType.uint8]]
@@ -106,7 +107,7 @@ def _allocate_completion_hook[
 ](
     handle: AnyCoroutine,
     var callback: Optional[CompletionCallback[CallbackPayload]],
-) -> _CompletionHookPtr[CallbackPayload]:
+) -> ErasedOwnedPointer:
     """Allocate a completion hook on the heap and install it in a task
     coroutine's frame.
 
@@ -119,8 +120,8 @@ def _allocate_completion_hook[
             as completed. Ownership is transferred.
 
     Returns:
-        The hook. The caller owns it: destroy and free it once the coroutine
-        is done with it.
+        The hook, its payload type erased. Keep it alive for as long as the
+        coroutine may complete.
     """
 
     def _on_completion(hook: _CompletionHookPtr[CallbackPayload]):
@@ -130,13 +131,22 @@ def _allocate_completion_hook[
             hook[].callback.value()()
         hook[].completed.store(1)
 
-    var hook = (
-        OwnedPointer(_CompletionHook(callback^))
-        .unsafe_take_allocation()
-        .unsafe_leak()
-    )
+    var hook = ErasedOwnedPointer(_CompletionHook(callback^))
 
     var ctx = _get_ctx[_CompletionHookPtr[CallbackPayload]](handle)
     ctx[].callback = _on_completion
-    ctx[].payload = hook
-    return hook
+    ctx[].payload = _completion_hook_ptr[CallbackPayload](hook)
+    return hook^
+
+
+def _completion_hook_ptr[
+    CallbackPayload: Movable & Deinitable
+](hook: ErasedOwnedPointer) -> _CompletionHookPtr[CallbackPayload]:
+    """Return the typed hook behind a pointer from `_allocate_completion_hook`.
+
+    Aborts if `hook` doesn't hold a `_CompletionHook[CallbackPayload]`.
+    """
+    try:
+        return hook.get[_CompletionHook[CallbackPayload]]()
+    except e:
+        abort(String("bug: not a completion hook: ", e))
