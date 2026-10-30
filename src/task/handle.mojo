@@ -93,7 +93,7 @@ struct _TaskHandle(Movable):
         callback, if any, has run."""
         # The flag is `_CompletionHook`'s first field, so it can be read
         # without knowing the hook's payload type.
-        return self._hook.get[_COMPLETED_FLAG_TYPE]()[].load() != 0
+        return self._hook.unsafe_get[_COMPLETED_FLAG_TYPE]()[].load() != 0
 
 
 def _coroutine_address(hdl: AnyCoroutine) -> String:

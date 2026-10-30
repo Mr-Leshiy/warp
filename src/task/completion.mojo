@@ -1,5 +1,6 @@
 from std.atomic import Atomic
 from std.collections.optional import Optional
+from std.os import abort
 
 from std.builtin._coroutine import AnyCoroutine
 
@@ -134,5 +135,18 @@ def _allocate_completion_hook[
 
     var ctx = _get_ctx[_CompletionHookPtr[CallbackPayload]](handle)
     ctx[].callback = _on_completion
-    ctx[].payload = hook.get[_CompletionHook[CallbackPayload]]()
+    ctx[].payload = _completion_hook_ptr[CallbackPayload](hook)
     return hook^
+
+
+def _completion_hook_ptr[
+    CallbackPayload: Movable & Deinitable
+](hook: ErasedOwnedPointer) -> _CompletionHookPtr[CallbackPayload]:
+    """Return the typed hook behind a pointer from `_allocate_completion_hook`.
+
+    Aborts if `hook` doesn't hold a `_CompletionHook[CallbackPayload]`.
+    """
+    try:
+        return hook.get[_CompletionHook[CallbackPayload]]()
+    except e:
+        abort(String("bug: not a completion hook: ", e))
