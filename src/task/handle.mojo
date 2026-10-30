@@ -10,6 +10,7 @@ from std.builtin._coroutine import (
 from std.collections.optional import Optional
 from std.memory.owned_pointer import OwnedPointer
 
+from ..utils import ErasedOwnedPointer
 from .completion import (
     CompletionCallback,
     _CompletionState,
@@ -31,6 +32,10 @@ struct _TaskHandle(Movable):
     awaiting that suspended (see `set_resume_at`)."""
     var _state: OwnedPointer[_CompletionState]
     """The heap-allocated completion state the coroutine frame points at."""
+    var _result: Optional[ErasedOwnedPointer]
+    """The coroutine's result slot — its value, or for a raising coroutine
+    its value or error — its type erased. None until results move here from
+    the typed task."""
 
     def __init__[
         CallbackPayload: Movable & Deinitable = NoneType,
@@ -51,6 +56,7 @@ struct _TaskHandle(Movable):
         self._handle = coro_handle
         self._resume_at = self._handle
         self._state = _allocate_completion_state(self._handle, callback^)
+        self._result = None
 
     def __deinit__(deinit self):
         """Destroy the coroutine; its completion state is freed after it."""
