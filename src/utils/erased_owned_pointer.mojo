@@ -94,9 +94,9 @@ struct TypeMismatchError(ImplicitlyCopyable, Writable):
     def write_to(self, mut writer: Some[Writer]):
         writer.write(
             "ErasedOwnedPointer holds `",
-            self.held.name(),
+            self.held,
             "`, not `",
-            self.requested.name(),
+            self.requested,
             "`",
         )
 
