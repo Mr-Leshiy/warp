@@ -12,13 +12,9 @@ from std.collections.optional import Optional
 from .completion import (
     CompletionCallback,
     _COMPLETED_FLAG_TYPE,
-    _CompletionHookPtr,
-    _CompletionHook,
     _allocate_completion_hook,
 )
-
-comptime _ErasedCompletionHookPtr = MutOpaquePointer[MutUntrackedOrigin]
-"""Points at a heap-allocated `_CompletionHook`, its payload type erased."""
+from ..utils import ErasedOwnedPointer
 
 
 struct _TaskHandle(Movable):
@@ -33,9 +29,8 @@ struct _TaskHandle(Movable):
     var _resume_at: AnyCoroutine
     """The frame to resume next: the task's own coroutine, or one it's
     awaiting that suspended (see `set_resume_at`)."""
-    var _hook: _ErasedCompletionHookPtr
-    var _hook_deinit: def(_ErasedCompletionHookPtr) thin -> None
-    """Destroys and frees `_hook`; the one operation that needs its type."""
+    var _hook: ErasedOwnedPointer
+    """The heap-allocated `_CompletionHook`, its payload type erased."""
 
     def __init__[
         CallbackPayload: Movable & Deinitable = NoneType,
@@ -55,13 +50,10 @@ struct _TaskHandle(Movable):
         """
         self._handle = coro_handle
         self._resume_at = self._handle
-        var hook = _allocate_completion_hook(self._handle, callback^)
-        self._hook = hook.unsafe_bitcast[NoneType]()
-        self._hook_deinit = _hook_deinit[CallbackPayload]
+        self._hook = _allocate_completion_hook(self._handle, callback^)
 
     def __deinit__(deinit self):
-        """Destroy the coroutine and free its completion hook."""
-        self._hook_deinit(self._hook)
+        """Destroy the coroutine; its completion hook is freed after it."""
         _coro_destroy_fn(self._handle)
 
     def set_resume_at(mut self, frame: AnyCoroutine):
@@ -99,15 +91,9 @@ struct _TaskHandle(Movable):
     def is_completed(self) -> Bool:
         """Return True once the coroutine has run to completion and its
         callback, if any, has run."""
-        return self._hook.unsafe_bitcast[_COMPLETED_FLAG_TYPE]()[].load() != 0
-
-
-def _hook_deinit[
-    CallbackPayload: Movable & Deinitable
-](hook: _ErasedCompletionHookPtr):
-    var ptr = hook.unsafe_bitcast[_CompletionHook[CallbackPayload]]()
-    ptr.unsafe_deinit_pointee()
-    ptr.unsafe_free()
+        # The flag is `_CompletionHook`'s first field, so it can be read
+        # without knowing the hook's payload type.
+        return self._hook.get[_COMPLETED_FLAG_TYPE]()[].load() != 0
 
 
 def _coroutine_address(hdl: AnyCoroutine) -> String:
