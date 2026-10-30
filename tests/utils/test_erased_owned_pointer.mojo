@@ -105,7 +105,7 @@ def test_get_raises_on_the_wrong_type() raises:
         raised = True
         assert_true(e.held == TypeId.of[String]())
         assert_true(e.requested == TypeId.of[Int]())
-        assert_true("not `SIMD[DType.int, 1]`" in String(e))
+        assert_true(String("not `", TypeId.of[Int](), "`") in String(e))
     assert_true(raised)
 
     # The right type still reads fine afterwards.
