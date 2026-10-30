@@ -8,13 +8,13 @@ from std.builtin._coroutine import (
     _coro_destroy_fn,
 )
 from std.collections.optional import Optional
+from std.memory.owned_pointer import OwnedPointer
 
 from .completion import (
     CompletionCallback,
-    _COMPLETED_FLAG_TYPE,
+    _CompletionHook,
     _allocate_completion_hook,
 )
-from ..utils import ErasedOwnedPointer
 
 
 struct _TaskHandle(Movable):
@@ -29,15 +29,13 @@ struct _TaskHandle(Movable):
     var _resume_at: AnyCoroutine
     """The frame to resume next: the task's own coroutine, or one it's
     awaiting that suspended (see `set_resume_at`)."""
-    var _hook: ErasedOwnedPointer
-    """The heap-allocated `_CompletionHook`, its payload type erased."""
+    var _hook: OwnedPointer[_CompletionHook]
+    """The heap-allocated completion hook the coroutine frame points at."""
 
-    def __init__[
-        CallbackPayload: Movable & Deinitable = NoneType,
-    ](
+    def __init__(
         out self,
         var coro_handle: AnyCoroutine,
-        var callback: Optional[CompletionCallback[CallbackPayload]],
+        var callback: Optional[CompletionCallback],
     ):
         """Take ownership of a coroutine and install its completion hook.
 
@@ -91,13 +89,7 @@ struct _TaskHandle(Movable):
     def is_completed(self) -> Bool:
         """Return True once the coroutine has run to completion and its
         callback, if any, has run."""
-        # The flag is `_CompletionHook`'s first field, so it can be read
-        # without knowing the hook's payload type.
-        # TODO: stop relying on field layout: Mojo doesn't guarantee fields
-        # stay in declaration order, and nothing enforces the flag staying
-        # first. Capture the typed read in `__init__` instead (a pointer to
-        # the flag, or a `_hook_is_completed[CallbackPayload]` function).
-        return self._hook.unsafe_get[_COMPLETED_FLAG_TYPE]()[].load() != 0
+        return self._hook[].is_completed()
 
 
 def _coroutine_address(hdl: AnyCoroutine) -> String:

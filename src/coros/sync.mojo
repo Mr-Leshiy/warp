@@ -29,8 +29,6 @@ def _spawn_synchronize_coro(runtime: ArcPointer[_RuntimeInner]):
         var sync_coro = RaisingTask(
             _synchronize(runtime[]._ctx),
             runtime.copy(),
-            CompletionCallback[ArcPointer[_RuntimeInner]](
-                _completion_callback, runtime.copy()
-            ),
+            CompletionCallback(_completion_callback, runtime.copy()),
         )
         runtime[].add(sync_coro.handle())

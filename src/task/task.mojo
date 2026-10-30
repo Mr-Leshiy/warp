@@ -10,7 +10,6 @@ from .handle import _TaskHandle
 struct Task[
     type: Deinitable & Movable,
     origins: OriginSet,
-    CallbackPayload: Movable & Deinitable = NoneType,
 ](Movable where False):
     """A coroutine queued on a `Runtime`, and the result it will produce.
 
@@ -26,7 +25,7 @@ struct Task[
         out self,
         var coro: Coroutine[Self.type, Self.origins],
         var runtime: ArcPointer[_RuntimeInner],
-        var callback: Optional[CompletionCallback[Self.CallbackPayload]] = None,
+        var callback: Optional[CompletionCallback] = None,
     ):
         """Initialize a task with a coroutine.
 
