@@ -93,6 +93,10 @@ struct _TaskHandle(Movable):
         callback, if any, has run."""
         # The flag is `_CompletionHook`'s first field, so it can be read
         # without knowing the hook's payload type.
+        # TODO: stop relying on field layout: Mojo doesn't guarantee fields
+        # stay in declaration order, and nothing enforces the flag staying
+        # first. Capture the typed read in `__init__` instead (a pointer to
+        # the flag, or a `_hook_is_completed[CallbackPayload]` function).
         return self._hook.unsafe_get[_COMPLETED_FLAG_TYPE]()[].load() != 0
 
 
