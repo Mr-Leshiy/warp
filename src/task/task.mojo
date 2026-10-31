@@ -1,8 +1,10 @@
 from std.builtin._coroutine import Coroutine
 from std.collections.optional import Optional
 from std.memory import ArcPointer
+from std.os import abort
 
 from ..runtime import _RuntimeInner
+from ..utils import unsafe_arc_take
 from .completion import CompletionCallback
 from .handle import _TaskHandle
 
@@ -20,7 +22,6 @@ struct Task[
 
     var _runtime: ArcPointer[_RuntimeInner]
     var _handle: ArcPointer[_TaskHandle]
-    var _result: Self.type
 
     def __init__(
         out self,
@@ -30,8 +31,8 @@ struct Task[
     ):
         """Initialize a task with a coroutine.
 
-        Takes ownership of the provided coroutine and points it at this task's
-        result slot and completion state.
+        Takes ownership of the provided coroutine; its handle owns the result
+        slot and completion state.
 
         Args:
             coro: The coroutine to execute as a task. Ownership is
@@ -42,17 +43,7 @@ struct Task[
                 reads as completed. None by default.
         """
         self._runtime = runtime^
-
-        # `_result` isn't actually written yet — the coroutine writes it,
-        # through the pointer handed to `_set_result_slot` below — but every
-        # field must be initialized by the end of `__init__`, so this stands
-        # in until then.
-        __mlir_op.`lit.ownership.mark_initialized`(
-            __get_mvalue_as_litref(self._result)
-        )
-        coro._set_result_slot(Pointer(to=self._result))
-
-        self._handle = ArcPointer(_TaskHandle(coro^._take_handle(), callback^))
+        self._handle = ArcPointer(_TaskHandle(coro^, callback^))
 
     def wait(deinit self) -> Self.type:
         """Run the runtime until this task completes, then take its result.
@@ -66,7 +57,7 @@ struct Task[
 
         self._runtime[].wait_until[completed]()
 
-        return self._result^
+        return _take_result[Self.type](self._handle^)
 
     def is_completed(self) -> Bool:
         """Return True once the coroutine has run to completion.
@@ -84,3 +75,14 @@ struct Task[
             The shared task handle, for queueing on a runtime.
         """
         return self._handle.copy()
+
+
+def _take_result[
+    type: Deinitable & Movable
+](var handle: ArcPointer[_TaskHandle]) -> type:
+    try:
+        var task_handle = unsafe_arc_take(handle^)
+        var result = task_handle^.to_result[type]()
+        return result^
+    except e:
+        abort(String("bug: taking a completed task's result failed: ", e))

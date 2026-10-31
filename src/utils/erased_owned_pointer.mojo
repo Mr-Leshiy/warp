@@ -99,7 +99,7 @@ struct ErasedOwnedPointer(Movable):
             self._deinit(self._ptr)
             raise error
         var typed = self._ptr.unsafe_bitcast[T]()
-        var value = typed.take_pointee()
+        var value = typed.unsafe_take_pointee()
         typed.unsafe_free()
         return value^
 
