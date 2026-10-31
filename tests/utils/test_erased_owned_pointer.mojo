@@ -113,5 +113,35 @@ def test_get_raises_on_the_wrong_type() raises:
     _ = ptr^
 
 
+def test_to_inner_moves_the_value_out() raises:
+    var count = ArcPointer(0)
+    var ptr = ErasedOwnedPointer(_DropCounter(count.copy()))
+
+    var value = ptr^.to_inner[_DropCounter]()
+    # Moving out doesn't run the destructor; dropping the result does.
+    assert_equal(count[], 0)
+    _ = value^
+    assert_equal(count[], 1)
+
+    var text = ErasedOwnedPointer(String("hello")).to_inner[String]()
+    assert_equal(text, "hello")
+
+
+def test_to_inner_raises_on_the_wrong_type() raises:
+    var count = ArcPointer(0)
+    var ptr = ErasedOwnedPointer(_DropCounter(count.copy()))
+    var raised = False
+    try:
+        _ = ptr^.to_inner[Int]()
+    except e:
+        raised = True
+        assert_true(e.held == TypeId.of[_DropCounter]())
+        assert_true(e.requested == TypeId.of[Int]())
+    assert_true(raised)
+    # The pointer was consumed, so the value is destroyed even though the
+    # move-out failed.
+    assert_equal(count[], 1)
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()
