@@ -10,7 +10,7 @@ from std.builtin._coroutine import (
 from std.collections.optional import Optional
 from std.memory.owned_pointer import OwnedPointer
 
-from .completion import (
+from ..completion import (
     CompletionCallback,
     _CompletionState,
     _allocate_completion_state,
