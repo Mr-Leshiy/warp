@@ -1,60 +1,131 @@
-"""The part of a task that doesn't depend on its result or callback types."""
+"""The type-erased task handle the runtime queues: any typed handle behind
+an `ErasedOwnedPointer`, driven through a hand-built vtable."""
 
-from std.builtin._coroutine import (
-    AnyCoroutine,
-    Coroutine,
-    RaisingCoroutine,
-    _coro_resume_fn,
-    _coro_destroy_fn,
-)
-from std.collections.optional import Optional
-from std.memory.owned_pointer import OwnedPointer
+from std.builtin._coroutine import AnyCoroutine
+from std.os import abort
 
-from ..completion import (
-    CompletionCallback,
-    _CompletionState,
-    _allocate_completion_state,
-)
+from ...utils import ErasedOwnedPointer
+
+
+trait _TypedTaskHandle(Deinitable, Movable):
+    """What the runtime needs from a typed task handle
+    (`_CoroutineHandle`, `_RaisingCoroutineHandle`): the operations
+    `_TaskHandleVTable` dispatches to."""
+
+    def resume(self):
+        """Resume the task from the frame it last suspended in."""
+        ...
+
+    def set_resume_at(mut self, frame: AnyCoroutine):
+        """Record the frame that suspended, so the next resume picks up there.
+
+        Args:
+            frame: The suspended frame. The task keeps owning it.
+        """
+        ...
+
+    def is_completed(self) -> Bool:
+        """Return True once the coroutine has run to completion and its
+        callback, if any, has run."""
+        ...
+
+    def addr(self) -> String:
+        """Return the address of the task's own coroutine frame, for logging."""
+        ...
+
+    def resume_addr(self) -> String:
+        """Return the address of the frame the next resume picks up in, for
+        logging."""
+        ...
+
+
+@fieldwise_init
+struct _TaskHandleVTable(ImplicitlyCopyable, Movable):
+    """The operations of one typed task handle, each taking the handle
+    behind an `ErasedOwnedPointer`: an emulated vtable.
+
+    There's no `drop` entry: `ErasedOwnedPointer` already carries the typed
+    handle's destructor, and runs it when the `_TaskHandle` is dropped.
+    """
+
+    var resume: def(ErasedOwnedPointer) thin -> None
+    var set_resume_at: def(ErasedOwnedPointer, AnyCoroutine) thin -> None
+    var is_completed: def(ErasedOwnedPointer) thin -> Bool
+    var addr: def(ErasedOwnedPointer) thin -> String
+    var resume_addr: def(ErasedOwnedPointer) thin -> String
+
+    @staticmethod
+    def of[H: _TypedTaskHandle]() -> Self:
+        """Return the vtable of the typed handle `H`.
+
+        Each entry reads the erased pointer as an `H` unchecked: a
+        `_TaskHandle` only ever pairs a vtable with a pointer to the same `H`.
+        """
+        return Self(
+            resume=_resume[H],
+            set_resume_at=_set_resume_at[H],
+            is_completed=_is_completed[H],
+            addr=_addr[H],
+            resume_addr=_resume_addr[H],
+        )
+
+
+def _resume[H: _TypedTaskHandle](handle: ErasedOwnedPointer):
+    handle.unsafe_get[H]()[].resume()
+
+
+def _set_resume_at[
+    H: _TypedTaskHandle
+](handle: ErasedOwnedPointer, frame: AnyCoroutine):
+    handle.unsafe_get[H]()[].set_resume_at(frame)
+
+
+def _is_completed[H: _TypedTaskHandle](handle: ErasedOwnedPointer) -> Bool:
+    return handle.unsafe_get[H]()[].is_completed()
+
+
+def _addr[H: _TypedTaskHandle](handle: ErasedOwnedPointer) -> String:
+    return handle.unsafe_get[H]()[].addr()
+
+
+def _resume_addr[H: _TypedTaskHandle](handle: ErasedOwnedPointer) -> String:
+    return handle.unsafe_get[H]()[].resume_addr()
 
 
 struct _TaskHandle(Movable):
-    """A task's coroutine and its completion state.
+    """A task's typed handle, its type erased.
 
     Has no type parameters, so the handles of any tasks fit in one `List` or
-    queue. The state lives on the heap, owned by this handle, at the address
-    the coroutine frame points at — so the handle itself is free to move.
+    queue. Owns the typed handle — and with it the coroutine, its completion
+    state, and its result — on the heap; dropping this drops all of them.
     """
 
-    var _handle: AnyCoroutine
-    var _resume_at: AnyCoroutine
-    """The frame to resume next: the task's own coroutine, or one it's
-    awaiting that suspended (see `set_resume_at`)."""
-    var _state: OwnedPointer[_CompletionState]
-    """The heap-allocated completion state the coroutine frame points at."""
+    var _handle: ErasedOwnedPointer
+    var _vtable: _TaskHandleVTable
 
-    def __init__[
-        CallbackPayload: Movable & Deinitable = NoneType,
-    ](
-        out self,
-        var coro_handle: AnyCoroutine,
-        var callback: Optional[CompletionCallback[CallbackPayload]],
-    ):
-        """Take ownership of a coroutine and install its completion state.
-
-        Its result slot must already be set (`_set_result_slot`).
+    def __init__[H: _TypedTaskHandle](out self, var handle: H):
+        """Move a typed handle onto the heap and take ownership of it.
 
         Args:
-            coro_handle: The coroutine handle. Ownership is transferred.
-            callback: Called once the coroutine completes, before the task
-                reads as completed. Ownership is transferred.
+            handle: The typed handle. Ownership is transferred.
         """
-        self._handle = coro_handle
-        self._resume_at = self._handle
-        self._state = _allocate_completion_state(self._handle, callback^)
+        self._vtable = _TaskHandleVTable.of[H]()
+        self._handle = ErasedOwnedPointer(handle^)
 
-    def __deinit__(deinit self):
-        """Destroy the coroutine; its completion state is freed after it."""
-        _coro_destroy_fn(self._handle)
+    def get[H: _TypedTaskHandle](self) -> Pointer[H, MutUntrackedOrigin]:
+        """Return the typed handle.
+
+        The pointer doesn't keep this handle alive: keep the `_TaskHandle`
+        alive past its last use.
+
+        Aborts if `H` isn't the type this handle was built with: the task
+        that built it is the only one asking for its type, so that would be
+        a bug.
+        """
+        try:
+            return self._handle.get[H]()
+        except e:
+            abort(String("bug: not this task's handle type: ", e))
 
     def set_resume_at(mut self, frame: AnyCoroutine):
         """Record the frame that suspended, so the next resume picks up there.
@@ -66,43 +137,22 @@ struct _TaskHandle(Movable):
         Args:
             frame: The suspended frame. The task keeps owning it.
         """
-        self._resume_at = frame
+        self._vtable.set_resume_at(self._handle, frame)
 
     def addr(self) -> String:
         """Return the address of the task's own coroutine frame, for logging."""
-        return _coroutine_address(self._handle)
+        return self._vtable.addr(self._handle)
 
     def resume_addr(self) -> String:
         """Return the address of the frame the next resume picks up in, for
         logging."""
-        return _coroutine_address(self._resume_at)
+        return self._vtable.resume_addr(self._handle)
 
     def resume_coroutine(self):
         """Resume the task from the frame it last suspended in."""
-        _coro_resume_fn(self._resume_at)
-
-    def has_error(self) -> Bool:
-        """Return True if the completed coroutine raised rather than returned.
-
-        Only valid for a raising coroutine, once it has completed.
-        """
-        return __mlir_op.`co.get_results`[_type=__mlir_type.i1](self._handle)
+        self._vtable.resume(self._handle)
 
     def is_completed(self) -> Bool:
         """Return True once the coroutine has run to completion and its
         callback, if any, has run."""
-        return self._state[].is_completed()
-
-
-def _coroutine_address(hdl: AnyCoroutine) -> String:
-    """Return the address of a coroutine handle, for logging.
-
-    `AnyCoroutine` is an opaque MLIR type, not a pointer, so there's no
-    direct way to read its bits. Taking a `Pointer` to the local `hdl` and
-    reinterpreting *that* as a `Pointer[Int]` gives a view onto the same
-    (pointer-sized) bytes, which can then be read as an address.
-
-    Args:
-        hdl: The coroutine handle to return the address of.
-    """
-    return hex(UInt64(Pointer(to=hdl).unsafe_bitcast[Int]()[]))
+        return self._vtable.is_completed(self._handle)

@@ -1,28 +1,27 @@
 from std.builtin._coroutine import RaisingCoroutine
 from std.collections.optional import Optional
-from std.memory import ArcPointer, forget_deinit
+from std.memory import ArcPointer
 
 from ..runtime import _RuntimeInner
 from .completion import CompletionCallback
-from .handle import _TaskHandle
+from .handle import _RaisingCoroutineHandle, _TaskHandle
 
 
 struct RaisingTask[
     type: Deinitable & Movable,
     origins: OriginSet,
     CallbackPayload: Movable & Deinitable = NoneType,
-](Movable where False):
+](Movable):
     """A raising coroutine queued on a `Runtime`, and the result — or the
     error — it will produce.
 
-    Immovable: the coroutine writes its result or error through pointers into
-    this struct.
+    The result or error is written into the task's handle, which the
+    runtime's queue shares, so the task is free to move — or to be dropped
+    before its coroutine completes.
     """
 
     var _runtime: ArcPointer[_RuntimeInner]
     var _handle: ArcPointer[_TaskHandle]
-    var _result: Self.type
-    var _error: Error
 
     def __init__(
         out self,
@@ -32,8 +31,9 @@ struct RaisingTask[
     ):
         """Initialize a task with a raising coroutine.
 
-        Takes ownership of the provided coroutine and points it at this
-        task's result slot, error slot, and completion state.
+        Takes ownership of the provided coroutine and hands it to a new
+        handle, which holds its result slot, error slot, and completion
+        state.
 
         Args:
             coro: The raising coroutine to execute as a task. Ownership is
@@ -44,26 +44,15 @@ struct RaisingTask[
                 reads as completed. None by default.
         """
         self._runtime = runtime^
-
-        # Neither slot is actually written yet — the coroutine writes
-        # whichever one it completes with, through the pointers handed to
-        # `_set_result_slot` below — but every field must be initialized by
-        # the end of `__init__`, so this stands in until then.
-        __mlir_op.`lit.ownership.mark_initialized`(
-            __get_mvalue_as_litref(self._result)
+        self._handle = ArcPointer(
+            _TaskHandle(_RaisingCoroutineHandle[Self.type](coro^, callback^))
         )
-        __mlir_op.`lit.ownership.mark_initialized`(
-            __get_mvalue_as_litref(self._error)
-        )
-        coro._set_result_slot(Pointer(to=self._result), Pointer(to=self._error))
-
-        self._handle = ArcPointer(_TaskHandle(coro^._take_handle(), callback^))
 
     def wait(deinit self) raises -> Self.type:
         """Run the runtime until this task completes, then take its result.
 
-        Consumes the task: the completion state and the result/error slots
-        it owns die with it.
+        Consumes the task: the handle, and the coroutine and completion state
+        it owns, die with it unless the runtime still holds them.
 
         Raises:
             The error the coroutine raised, if it raised one.
@@ -75,17 +64,17 @@ struct RaisingTask[
 
         self._runtime[].wait_until[completed]()
 
-        # `has_error` reading `_handle` here is also what keeps it — and the
-        # completion state `completed` reads — alive through the wait above.
-        if self._handle[].has_error():
-            # `_result` was never written in this case — don't run its
-            # destructor over the uninitialized bytes sitting there.
-            forget_deinit(self._result^)
-            raise self._error^
-
-        # `_error` was never written in this case — same reasoning.
-        forget_deinit(self._error^)
-        return self._result^
+        var handle = self._handle^
+        var typed = handle[].get[_RaisingCoroutineHandle[Self.type]]()
+        # `get`'s pointer doesn't keep `handle` alive; dropping it only after
+        # the take keeps the slot being read alive through it.
+        if typed[].has_error():
+            var error = typed[].take_error()
+            _ = handle^
+            raise error^
+        var result = typed[].take_result()
+        _ = handle^
+        return result^
 
     def is_completed(self) -> Bool:
         """Return True once the coroutine has run to completion.
@@ -96,8 +85,7 @@ struct RaisingTask[
         return self._handle[].is_completed()
 
     def handle(self) -> ArcPointer[_TaskHandle]:
-        """Return a new reference to this task's coroutine and completion
-        state.
+        """Return a new reference to this task's handle.
 
         Returns:
             The shared task handle, for queueing on a runtime.

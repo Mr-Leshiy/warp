@@ -4,23 +4,23 @@ from std.memory import ArcPointer
 
 from ..runtime import _RuntimeInner
 from .completion import CompletionCallback
-from .handle import _TaskHandle
+from .handle import _CoroutineHandle, _TaskHandle
 
 
 struct Task[
     type: Deinitable & Movable,
     origins: OriginSet,
     CallbackPayload: Movable & Deinitable = NoneType,
-](Movable where False):
+](Movable):
     """A coroutine queued on a `Runtime`, and the result it will produce.
 
-    Immovable: the coroutine writes its result through a pointer into this
-    struct.
+    The result is written into the task's handle, which the runtime's queue
+    shares, so the task is free to move — or to be dropped before its
+    coroutine completes.
     """
 
     var _runtime: ArcPointer[_RuntimeInner]
     var _handle: ArcPointer[_TaskHandle]
-    var _result: Self.type
 
     def __init__(
         out self,
@@ -30,8 +30,8 @@ struct Task[
     ):
         """Initialize a task with a coroutine.
 
-        Takes ownership of the provided coroutine and points it at this task's
-        result slot and completion state.
+        Takes ownership of the provided coroutine and hands it to a new
+        handle, which holds its result slot and completion state.
 
         Args:
             coro: The coroutine to execute as a task. Ownership is
@@ -42,22 +42,15 @@ struct Task[
                 reads as completed. None by default.
         """
         self._runtime = runtime^
-
-        # `_result` isn't actually written yet — the coroutine writes it,
-        # through the pointer handed to `_set_result_slot` below — but every
-        # field must be initialized by the end of `__init__`, so this stands
-        # in until then.
-        __mlir_op.`lit.ownership.mark_initialized`(
-            __get_mvalue_as_litref(self._result)
+        self._handle = ArcPointer(
+            _TaskHandle(_CoroutineHandle[Self.type](coro^, callback^))
         )
-        coro._set_result_slot(Pointer(to=self._result))
-
-        self._handle = ArcPointer(_TaskHandle(coro^._take_handle(), callback^))
 
     def wait(deinit self) -> Self.type:
         """Run the runtime until this task completes, then take its result.
 
-        Consumes the task: the completion state and the result slot it owns die with it.
+        Consumes the task: the handle, and the coroutine and completion state
+        it owns, die with it unless the runtime still holds them.
         """
 
         @__parameter
@@ -66,7 +59,12 @@ struct Task[
 
         self._runtime[].wait_until[completed]()
 
-        return self._result^
+        var handle = self._handle^
+        var result = handle[].get[_CoroutineHandle[Self.type]]()[].take_result()
+        # `get`'s pointer doesn't keep `handle` alive; dropping it only here
+        # keeps the result slot alive through `take_result` above.
+        _ = handle^
+        return result^
 
     def is_completed(self) -> Bool:
         """Return True once the coroutine has run to completion.
@@ -77,8 +75,7 @@ struct Task[
         return self._handle[].is_completed()
 
     def handle(self) -> ArcPointer[_TaskHandle]:
-        """Return a new reference to this task's coroutine and completion
-        state.
+        """Return a new reference to this task's handle.
 
         Returns:
             The shared task handle, for queueing on a runtime.

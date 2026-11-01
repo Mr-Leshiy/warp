@@ -85,6 +85,10 @@ def test_tasks_make_progress_without_corrupting_shared_state() raises:
         # order between tasks is an implementation detail, not a
         # contract (see this file's ground rule).
         assert_equal(counter_ptr[], 6)
+        # `counter_ptr` doesn't keep `counter` alive; without this, `counter`
+        # is freed right after its last use above, before the tasks write
+        # through the pointer.
+        _ = counter^
 
 
 __async def _no_yield(value: Int) -> Int:
