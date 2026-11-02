@@ -3,9 +3,7 @@
 from std.builtin._coroutine import AnyCoroutine
 from std.os import abort
 
-from std.memory import ArcPointer
-
-from ...utils import ErasedOwnedPointer, unsafe_arc_take
+from ...utils import ErasedOwnedPointer, TypeId
 
 
 trait _TypedTaskHandle(Deinitable, Movable):
@@ -93,7 +91,9 @@ struct _TaskHandle(Movable):
 
     def to_inner[H: _TypedTaskHandle](deinit self) -> H:
         """Move the typed handle out. Aborts if it isn't an `H`."""
-        return _typed_handle_from[H](self._handle^)
+        if self._handle.type_id() != TypeId.of[H]():
+            abort("bug: not this task's handle type")
+        return self._handle^.unsafe_to_inner[H]()
 
     def set_resume_at(mut self, frame: AnyCoroutine):
         """Record the frame to resume next."""
@@ -114,22 +114,3 @@ struct _TaskHandle(Movable):
     def is_completed(self) -> Bool:
         """Return True once the coroutine and its callback have run."""
         return self._vtable.is_completed(self._handle)
-
-
-def _take_typed_handle[
-    H: _TypedTaskHandle
-](var handle: ArcPointer[_TaskHandle]) -> H:
-    """Move the typed handle out of its last reference. Aborts if the handle
-    is still shared or isn't an `H`."""
-    return unsafe_arc_take(handle^).to_inner[H]()
-
-
-def _typed_handle_from[
-    H: _TypedTaskHandle
-](var handle: ErasedOwnedPointer) -> H:
-    """`_TaskHandle.to_inner`'s body: a `deinit self` method can't consume a
-    field inside a `try`."""
-    try:
-        return handle^.to_inner[H]()
-    except e:
-        abort(String("bug: not this task's handle type: ", e))

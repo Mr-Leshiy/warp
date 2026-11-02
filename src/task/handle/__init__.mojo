@@ -5,7 +5,6 @@ from .task_handle import (
     _TaskHandle,
     _TaskHandleVTable,
     _TypedTaskHandle,
-    _take_typed_handle,
 )
 from .coroutine_handle import _CoroutineHandle
 from .raising_coroutine_handle import _RaisingCoroutineHandle

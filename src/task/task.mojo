@@ -3,8 +3,9 @@ from std.collections.optional import Optional
 from std.memory import ArcPointer
 
 from ..runtime import _RuntimeInner
+from ..utils import unsafe_arc_take
 from .completion import CompletionCallback
-from .handle import _CoroutineHandle, _TaskHandle, _take_typed_handle
+from .handle import _CoroutineHandle, _TaskHandle
 
 
 struct Task[
@@ -44,9 +45,11 @@ struct Task[
 
         self._runtime[].wait_until[completed]()
 
-        return _take_typed_handle[_CoroutineHandle[Self.type]](
-            self._handle^
-        ).take_result()
+        return (
+            unsafe_arc_take(self._handle^)
+            .to_inner[_CoroutineHandle[Self.type]]()
+            .take_result()
+        )
 
     def is_completed(self) -> Bool:
         """Return True once the coroutine has completed."""
