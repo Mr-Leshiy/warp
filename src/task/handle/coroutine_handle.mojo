@@ -25,8 +25,6 @@ struct _CoroutineHandle[type: Deinitable & Movable](_TypedTaskHandle):
     var _coro: _TaskCoroutine
     var _result: Pointer[Self.type, MutUntrackedOrigin]
     """Uninitialized until the coroutine completes."""
-    var _taken: Bool
-    """Whether `take_result` has moved the result out."""
 
     def __init__[
         origins: OriginSet,
@@ -45,32 +43,30 @@ struct _CoroutineHandle[type: Deinitable & Movable](_TypedTaskHandle):
                 reads as completed. Ownership is transferred.
         """
         self._result = alloc[Self.type](1)
-        self._taken = False
         coro._set_result_slot(self._result)
         self._coro = _TaskCoroutine(coro^._take_handle(), callback^)
 
     def __deinit__(deinit self):
-        """Destroy the result, unless it was never written or already taken,
-        then free its slot. The coroutine is destroyed after."""
-        if self._coro.is_completed() and not self._taken:
+        """Destroy the result, if the coroutine wrote one, then free its slot.
+        The coroutine is destroyed after."""
+        if self._coro.is_completed():
             self._result.unsafe_deinit_pointee()
         self._result.unsafe_free()
 
-    def take_result(mut self) -> Self.type:
-        """Move the result out.
+    def take_result(deinit self) -> Self.type:
+        """Consume the handle and move the result out of it.
 
-        Aborts unless the coroutine has completed and the result hasn't been
-        taken yet: either would read an uninitialized slot.
+        The coroutine is destroyed with the handle. Aborts unless the
+        coroutine has completed: the slot would be uninitialized.
 
         Returns:
             The value the coroutine returned.
         """
         if not self._coro.is_completed():
             abort("bug: took the result of a coroutine that hasn't completed")
-        if self._taken:
-            abort("bug: took the result of a coroutine twice")
-        self._taken = True
-        return self._result.unsafe_take_pointee()
+        var result = self._result.unsafe_take_pointee()
+        self._result.unsafe_free()
+        return result^
 
     def resume(self):
         self._coro.resume()

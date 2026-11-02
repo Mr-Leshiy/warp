@@ -4,7 +4,9 @@ an `ErasedOwnedPointer`, driven through a hand-built vtable."""
 from std.builtin._coroutine import AnyCoroutine
 from std.os import abort
 
-from ...utils import ErasedOwnedPointer
+from std.memory import ArcPointer
+
+from ...utils import ErasedOwnedPointer, unsafe_arc_take
 
 
 trait _TypedTaskHandle(Deinitable, Movable):
@@ -112,20 +114,14 @@ struct _TaskHandle(Movable):
         self._vtable = _TaskHandleVTable.of[H]()
         self._handle = ErasedOwnedPointer(handle^)
 
-    def get[H: _TypedTaskHandle](self) -> Pointer[H, MutUntrackedOrigin]:
-        """Return the typed handle.
-
-        The pointer doesn't keep this handle alive: keep the `_TaskHandle`
-        alive past its last use.
+    def to_inner[H: _TypedTaskHandle](deinit self) -> H:
+        """Consume the handle and move the typed handle out of it.
 
         Aborts if `H` isn't the type this handle was built with: the task
         that built it is the only one asking for its type, so that would be
         a bug.
         """
-        try:
-            return self._handle.get[H]()
-        except e:
-            abort(String("bug: not this task's handle type: ", e))
+        return _typed_handle_from[H](self._handle^)
 
     def set_resume_at(mut self, frame: AnyCoroutine):
         """Record the frame that suspended, so the next resume picks up there.
@@ -156,3 +152,30 @@ struct _TaskHandle(Movable):
         """Return True once the coroutine has run to completion and its
         callback, if any, has run."""
         return self._vtable.is_completed(self._handle)
+
+
+def _take_typed_handle[
+    H: _TypedTaskHandle
+](var handle: ArcPointer[_TaskHandle]) -> H:
+    """Consume the last reference to a task handle and move its typed handle
+    out.
+
+    Aborts if anything else, e.g. the runtime's queue, still holds the
+    handle, or if `H` isn't its type.
+
+    Args:
+        handle: The only reference to the handle. Ownership is transferred.
+    """
+    return unsafe_arc_take(handle^).to_inner[H]()
+
+
+def _typed_handle_from[
+    H: _TypedTaskHandle
+](var handle: ErasedOwnedPointer) -> H:
+    """Move the typed handle out of an erased one, aborting if it isn't an
+    `H`. A free function: a `deinit self` method can't consume a field
+    inside a `try`."""
+    try:
+        return handle^.to_inner[H]()
+    except e:
+        abort(String("bug: not this task's handle type: ", e))

@@ -27,8 +27,6 @@ struct _RaisingCoroutineHandle[type: Deinitable & Movable](_TypedTaskHandle):
     """Uninitialized unless the coroutine completed by returning."""
     var _error: Pointer[Error, MutUntrackedOrigin]
     """Uninitialized unless the coroutine completed by raising."""
-    var _taken: Bool
-    """Whether `take_result` or `take_error` has moved the outcome out."""
 
     def __init__[
         origins: OriginSet,
@@ -48,14 +46,13 @@ struct _RaisingCoroutineHandle[type: Deinitable & Movable](_TypedTaskHandle):
         """
         self._result = alloc[Self.type](1)
         self._error = alloc[Error](1)
-        self._taken = False
         coro._set_result_slot(self._result, self._error)
         self._coro = _TaskCoroutine(coro^._take_handle(), callback^)
 
     def __deinit__(deinit self):
-        """Destroy whichever slot the coroutine wrote, unless it was already
-        taken, then free both slots. The coroutine is destroyed after."""
-        if self._coro.is_completed() and not self._taken:
+        """Destroy whichever slot the coroutine wrote, if any, then free both
+        slots. The coroutine is destroyed after."""
+        if self._coro.is_completed():
             if self.has_error():
                 self._error.unsafe_deinit_pointee()
             else:
@@ -72,40 +69,30 @@ struct _RaisingCoroutineHandle[type: Deinitable & Movable](_TypedTaskHandle):
             self._coro.raw()
         )
 
-    def take_result(mut self) -> Self.type:
-        """Move the result out.
+    def take_result(deinit self) raises -> Self.type:
+        """Consume the handle and move the result out of it, or raise the
+        error the coroutine raised.
 
-        Aborts unless the coroutine has completed by returning and its result
-        hasn't been taken yet: otherwise the slot is uninitialized.
+        The coroutine is destroyed with the handle. Aborts unless the
+        coroutine has completed: both slots would be uninitialized.
 
         Returns:
             The value the coroutine returned.
+
+        Raises:
+            The error the coroutine raised, if it raised one.
         """
-        self._take[raised=False]()
-        return self._result.unsafe_take_pointee()
-
-    def take_error(mut self) -> Error:
-        """Move the error out.
-
-        Aborts unless the coroutine has completed by raising and its error
-        hasn't been taken yet: otherwise the slot is uninitialized.
-
-        Returns:
-            The error the coroutine raised.
-        """
-        self._take[raised=True]()
-        return self._error.unsafe_take_pointee()
-
-    def _take[raised: Bool](mut self):
-        """Mark the outcome taken, aborting unless the coroutine completed
-        with that outcome and it hasn't been taken yet."""
         if not self._coro.is_completed():
-            abort("bug: took the outcome of a coroutine that hasn't completed")
-        if self._taken:
-            abort("bug: took the outcome of a coroutine twice")
-        if self.has_error() != raised:
-            abort("bug: took the wrong outcome of a coroutine")
-        self._taken = True
+            abort("bug: took the result of a coroutine that hasn't completed")
+        if self.has_error():
+            var error = self._error.unsafe_take_pointee()
+            self._result.unsafe_free()
+            self._error.unsafe_free()
+            raise error^
+        var result = self._result.unsafe_take_pointee()
+        self._result.unsafe_free()
+        self._error.unsafe_free()
+        return result^
 
     def resume(self):
         self._coro.resume()

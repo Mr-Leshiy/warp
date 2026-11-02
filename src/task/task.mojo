@@ -4,7 +4,7 @@ from std.memory import ArcPointer
 
 from ..runtime import _RuntimeInner
 from .completion import CompletionCallback
-from .handle import _CoroutineHandle, _TaskHandle
+from .handle import _CoroutineHandle, _TaskHandle, _take_typed_handle
 
 
 struct Task[
@@ -59,12 +59,9 @@ struct Task[
 
         self._runtime[].wait_until[completed]()
 
-        var handle = self._handle^
-        var result = handle[].get[_CoroutineHandle[Self.type]]()[].take_result()
-        # `get`'s pointer doesn't keep `handle` alive; dropping it only here
-        # keeps the result slot alive through `take_result` above.
-        _ = handle^
-        return result^
+        return _take_typed_handle[_CoroutineHandle[Self.type]](
+            self._handle^
+        ).take_result()
 
     def is_completed(self) -> Bool:
         """Return True once the coroutine has run to completion.
