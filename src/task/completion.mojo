@@ -77,7 +77,7 @@ struct _CompletionState(Movable):
 
     The coroutine frame's completion hook, `_on_completion`, runs the
     callback and then raises the flag. Lives on the heap, owned by a
-    `_TaskHandle`.
+    `_TaskFrame`.
     """
 
     var completed: _COMPLETED_FLAG_TYPE

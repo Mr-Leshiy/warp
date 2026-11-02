@@ -80,6 +80,26 @@ struct ErasedOwnedPointer(Movable):
         """
         return self._ptr.unsafe_bitcast[T]()
 
+    def to_inner[
+        T: Movable & Deinitable
+    ](deinit self) raises TypeMismatchError -> T:
+        """Consume the pointer and move the value out of it.
+
+        Raises:
+            TypeMismatchError: If `T` isn't the held type; the value is
+                destroyed first.
+        """
+        if self._type_id != TypeId.of[T]():
+            var error = TypeMismatchError(
+                held=self._type_id, requested=TypeId.of[T]()
+            )
+            self._deinit(self._ptr)
+            raise error
+        var typed = self._ptr.unsafe_bitcast[T]()
+        var value = typed.unsafe_take_pointee()
+        typed.unsafe_free()
+        return value^
+
 
 @fieldwise_init
 struct TypeMismatchError(ImplicitlyCopyable, Writable):
