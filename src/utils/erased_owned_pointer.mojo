@@ -100,14 +100,6 @@ struct ErasedOwnedPointer(Movable):
         typed.unsafe_free()
         return value^
 
-    def unsafe_to_inner[T: Movable & Deinitable](deinit self) -> T:
-        """Consume the pointer and move the value out as a `T`, without
-        checking the held type."""
-        var typed = self._ptr.unsafe_bitcast[T]()
-        var value = typed.unsafe_take_pointee()
-        typed.unsafe_free()
-        return value^
-
 
 @fieldwise_init
 struct TypeMismatchError(ImplicitlyCopyable, Writable):

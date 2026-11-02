@@ -143,15 +143,5 @@ def test_to_inner_raises_on_the_wrong_type() raises:
     assert_equal(count[], 1)
 
 
-def test_unsafe_to_inner_moves_the_value_out() raises:
-    var count = ArcPointer(0)
-    var ptr = ErasedOwnedPointer(_DropCounter(count.copy()))
-
-    var value = ptr^.unsafe_to_inner[_DropCounter]()
-    assert_equal(count[], 0)
-    _ = value^
-    assert_equal(count[], 1)
-
-
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()
