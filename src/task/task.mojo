@@ -54,4 +54,3 @@ struct Task[
     def is_completed(self) -> Bool:
         """Return True once the coroutine has completed."""
         return self._handle[].is_completed()
-
