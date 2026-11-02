@@ -12,12 +12,7 @@ struct Task[
     origins: OriginSet,
     CallbackPayload: Movable & Deinitable = NoneType,
 ](Movable):
-    """A coroutine queued on a `Runtime`, and the result it will produce.
-
-    The result is written into the task's handle, which the runtime's queue
-    shares, so the task is free to move — or to be dropped before its
-    coroutine completes.
-    """
+    """A coroutine queued on a `Runtime`, and the result it will produce."""
 
     var _runtime: ArcPointer[_RuntimeInner]
     var _handle: ArcPointer[_TaskHandle]
@@ -30,16 +25,10 @@ struct Task[
     ):
         """Initialize a task with a coroutine.
 
-        Takes ownership of the provided coroutine and hands it to a new
-        handle, which holds its result slot and completion state.
-
         Args:
-            coro: The coroutine to execute as a task. Ownership is
-                transferred.
-            runtime: The runtime running the coroutine. Ownership is
-                transferred.
-            callback: Called once the coroutine completes, before the task
-                reads as completed. None by default.
+            coro: The coroutine to run. Ownership is transferred.
+            runtime: The runtime running it. Ownership is transferred.
+            callback: Called once the coroutine completes. None by default.
         """
         self._runtime = runtime^
         self._handle = ArcPointer(
@@ -47,11 +36,7 @@ struct Task[
         )
 
     def wait(deinit self) -> Self.type:
-        """Run the runtime until this task completes, then take its result.
-
-        Consumes the task: the handle, and the coroutine and completion state
-        it owns, die with it unless the runtime still holds them.
-        """
+        """Run the runtime until this task completes, then return its result."""
 
         @__parameter
         def completed() -> Bool:
@@ -64,17 +49,9 @@ struct Task[
         ).take_result()
 
     def is_completed(self) -> Bool:
-        """Return True once the coroutine has run to completion.
-
-        A task that has not started, or that is parked on an `await`, reads as
-        False; once True, the result is there.
-        """
+        """Return True once the coroutine has completed."""
         return self._handle[].is_completed()
 
     def handle(self) -> ArcPointer[_TaskHandle]:
-        """Return a new reference to this task's handle.
-
-        Returns:
-            The shared task handle, for queueing on a runtime.
-        """
+        """Return a new reference to this task's handle, for queueing."""
         return self._handle.copy()

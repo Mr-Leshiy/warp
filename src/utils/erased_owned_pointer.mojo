@@ -85,12 +85,9 @@ struct ErasedOwnedPointer(Movable):
     ](deinit self) raises TypeMismatchError -> T:
         """Consume the pointer and move the value out of it.
 
-        The heap allocation is freed; the value's destructor doesn't run, as
-        the value lives on in the result.
-
         Raises:
-            TypeMismatchError: If `T` isn't the type the pointer was built
-                with. The value is destroyed and freed before raising.
+            TypeMismatchError: If `T` isn't the held type; the value is
+                destroyed first.
         """
         if self._type_id != TypeId.of[T]():
             var error = TypeMismatchError(

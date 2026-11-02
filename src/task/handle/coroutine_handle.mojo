@@ -1,4 +1,4 @@
-"""The handle of a task running a non-raising `Coroutine`."""
+"""The typed handle of a `Coroutine` task."""
 
 from std.builtin._coroutine import AnyCoroutine, Coroutine
 from std.collections.optional import Optional
@@ -11,16 +11,8 @@ from .task_handle import _TypedTaskHandle
 
 
 struct _CoroutineHandle[type: Deinitable & Movable](_TypedTaskHandle):
-    """A non-raising coroutine, its completion state, and the result it
-    writes.
-
-    The result slot lives on the heap, at the address the coroutine frame
-    writes through, so the handle itself is free to move — e.g. into the
-    type-erased `_TaskHandle`.
-
-    Parameters:
-        type: The type of the coroutine's result.
-    """
+    """A coroutine, its completion state, and its heap-allocated result
+    slot."""
 
     var _coro: _TaskFrame
     var _result: Pointer[Self.type, MutUntrackedOrigin]
@@ -34,34 +26,20 @@ struct _CoroutineHandle[type: Deinitable & Movable](_TypedTaskHandle):
         var coro: Coroutine[Self.type, origins],
         var callback: Optional[CompletionCallback[CallbackPayload]],
     ):
-        """Take ownership of a coroutine and point it at this handle's result
-        slot and completion state.
-
-        Args:
-            coro: The coroutine. Ownership is transferred.
-            callback: Called once the coroutine completes, before the task
-                reads as completed. Ownership is transferred.
-        """
+        """Take a coroutine and point it at this handle's result slot."""
         self._result = alloc[Self.type](1)
         coro._set_result_slot(self._result)
         self._coro = _TaskFrame(coro^._take_handle(), callback^)
 
     def __deinit__(deinit self):
-        """Destroy the result, if the coroutine wrote one, then free its slot.
-        The coroutine is destroyed after."""
+        """Destroy the result, if written, and free its slot."""
         if self._coro.is_completed():
             self._result.unsafe_deinit_pointee()
         self._result.unsafe_free()
 
     def take_result(deinit self) -> Self.type:
-        """Consume the handle and move the result out of it.
-
-        The coroutine is destroyed with the handle. Aborts unless the
-        coroutine has completed: the slot would be uninitialized.
-
-        Returns:
-            The value the coroutine returned.
-        """
+        """Consume the handle and return the result. Aborts unless the
+        coroutine has completed."""
         if not self._coro.is_completed():
             abort("bug: took the result of a coroutine that hasn't completed")
         var result = self._result.unsafe_take_pointee()

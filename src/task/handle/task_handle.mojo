@@ -1,5 +1,4 @@
-"""The type-erased task handle the runtime queues: any typed handle behind
-an `ErasedOwnedPointer`, driven through a hand-built vtable."""
+"""The type-erased task handle the runtime queues."""
 
 from std.builtin._coroutine import AnyCoroutine
 from std.os import abort
@@ -10,44 +9,34 @@ from ...utils import ErasedOwnedPointer, unsafe_arc_take
 
 
 trait _TypedTaskHandle(Deinitable, Movable):
-    """What the runtime needs from a typed task handle
-    (`_CoroutineHandle`, `_RaisingCoroutineHandle`): the operations
-    `_TaskHandleVTable` dispatches to."""
+    """A typed task handle: the operations `_TaskHandleVTable` dispatches to."""
 
     def resume(self):
-        """Resume the task from the frame it last suspended in."""
+        """Resume the task where it last suspended."""
         ...
 
     def set_resume_at(mut self, frame: AnyCoroutine):
-        """Record the frame that suspended, so the next resume picks up there.
-
-        Args:
-            frame: The suspended frame. The task keeps owning it.
-        """
+        """Record the frame to resume next."""
         ...
 
     def is_completed(self) -> Bool:
-        """Return True once the coroutine has run to completion and its
-        callback, if any, has run."""
+        """Return True once the coroutine and its callback have run."""
         ...
 
     def addr(self) -> String:
-        """Return the address of the task's own coroutine frame, for logging."""
+        """Return the task's coroutine address, for logging."""
         ...
 
     def resume_addr(self) -> String:
-        """Return the address of the frame the next resume picks up in, for
-        logging."""
+        """Return the address of the frame to resume next, for logging."""
         ...
 
 
 @fieldwise_init
 struct _TaskHandleVTable(ImplicitlyCopyable, Movable):
-    """The operations of one typed task handle, each taking the handle
-    behind an `ErasedOwnedPointer`: an emulated vtable.
+    """A typed handle's operations, over its `ErasedOwnedPointer`.
 
-    There's no `drop` entry: `ErasedOwnedPointer` already carries the typed
-    handle's destructor, and runs it when the `_TaskHandle` is dropped.
+    No `drop` entry: `ErasedOwnedPointer` runs the typed destructor.
     """
 
     var resume: def(ErasedOwnedPointer) thin -> None
@@ -58,11 +47,7 @@ struct _TaskHandleVTable(ImplicitlyCopyable, Movable):
 
     @staticmethod
     def of[H: _TypedTaskHandle]() -> Self:
-        """Return the vtable of the typed handle `H`.
-
-        Each entry reads the erased pointer as an `H` unchecked: a
-        `_TaskHandle` only ever pairs a vtable with a pointer to the same `H`.
-        """
+        """Return `H`'s vtable. Entries read the pointer as an `H` unchecked."""
 
         def _resume[H: _TypedTaskHandle](handle: ErasedOwnedPointer):
             handle.unsafe_get[H]()[].resume()
@@ -95,86 +80,55 @@ struct _TaskHandleVTable(ImplicitlyCopyable, Movable):
 
 
 struct _TaskHandle(Movable):
-    """A task's typed handle, its type erased.
-
-    Has no type parameters, so the handles of any tasks fit in one `List` or
-    queue. Owns the typed handle — and with it the coroutine, its completion
-    state, and its result — on the heap; dropping this drops all of them.
-    """
+    """A typed task handle with its type erased, so any task fits in one
+    queue."""
 
     var _handle: ErasedOwnedPointer
     var _vtable: _TaskHandleVTable
 
     def __init__[H: _TypedTaskHandle](out self, var handle: H):
-        """Move a typed handle onto the heap and take ownership of it.
-
-        Args:
-            handle: The typed handle. Ownership is transferred.
-        """
+        """Move a typed handle onto the heap."""
         self._vtable = _TaskHandleVTable.of[H]()
         self._handle = ErasedOwnedPointer(handle^)
 
     def to_inner[H: _TypedTaskHandle](deinit self) -> H:
-        """Consume the handle and move the typed handle out of it.
-
-        Aborts if `H` isn't the type this handle was built with: the task
-        that built it is the only one asking for its type, so that would be
-        a bug.
-        """
+        """Move the typed handle out. Aborts if it isn't an `H`."""
         return _typed_handle_from[H](self._handle^)
 
     def set_resume_at(mut self, frame: AnyCoroutine):
-        """Record the frame that suspended, so the next resume picks up there.
-
-        A task suspends in whichever frame hit the yield: its own coroutine or
-        one it's awaiting. Resuming the task's own frame instead would carry
-        it past its `await` as if the awaited coroutine had completed.
-
-        Args:
-            frame: The suspended frame. The task keeps owning it.
-        """
+        """Record the frame to resume next."""
         self._vtable.set_resume_at(self._handle, frame)
 
     def addr(self) -> String:
-        """Return the address of the task's own coroutine frame, for logging."""
+        """Return the task's coroutine address, for logging."""
         return self._vtable.addr(self._handle)
 
     def resume_addr(self) -> String:
-        """Return the address of the frame the next resume picks up in, for
-        logging."""
+        """Return the address of the frame to resume next, for logging."""
         return self._vtable.resume_addr(self._handle)
 
     def resume_coroutine(self):
-        """Resume the task from the frame it last suspended in."""
+        """Resume the task where it last suspended."""
         self._vtable.resume(self._handle)
 
     def is_completed(self) -> Bool:
-        """Return True once the coroutine has run to completion and its
-        callback, if any, has run."""
+        """Return True once the coroutine and its callback have run."""
         return self._vtable.is_completed(self._handle)
 
 
 def _take_typed_handle[
     H: _TypedTaskHandle
 ](var handle: ArcPointer[_TaskHandle]) -> H:
-    """Consume the last reference to a task handle and move its typed handle
-    out.
-
-    Aborts if anything else, e.g. the runtime's queue, still holds the
-    handle, or if `H` isn't its type.
-
-    Args:
-        handle: The only reference to the handle. Ownership is transferred.
-    """
+    """Move the typed handle out of its last reference. Aborts if the handle
+    is still shared or isn't an `H`."""
     return unsafe_arc_take(handle^).to_inner[H]()
 
 
 def _typed_handle_from[
     H: _TypedTaskHandle
 ](var handle: ErasedOwnedPointer) -> H:
-    """Move the typed handle out of an erased one, aborting if it isn't an
-    `H`. A free function: a `deinit self` method can't consume a field
-    inside a `try`."""
+    """`_TaskHandle.to_inner`'s body: a `deinit self` method can't consume a
+    field inside a `try`."""
     try:
         return handle^.to_inner[H]()
     except e:

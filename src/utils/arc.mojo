@@ -3,13 +3,8 @@ from std.os import abort
 
 
 def unsafe_arc_take[T: Movable & Deinitable](var arc: ArcPointer[T]) -> T:
-    """Consume the only reference to a value and move the value out of it.
-
-    `ArcPointer` has no way to move its value out, so this reaches into its
-    private heap block: the value is moved out, the block freed, and `arc`
-    marked destroyed so its destructor doesn't run over the moved-out value.
-
-    Aborts if `arc` isn't the only reference, strong or weak.
+    """Move the value out of its only reference, by reaching into the
+    `ArcPointer`'s private heap block. Aborts if `arc` is shared.
 
     Args:
         arc: The only reference to the value. Ownership is transferred.

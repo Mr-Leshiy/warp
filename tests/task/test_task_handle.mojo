@@ -1,7 +1,5 @@
-"""Task handles own their task's result: a `Task` or `RaisingTask` can be
-moved, or dropped while its coroutine is still queued, and whatever the
-coroutine produces is still destroyed exactly once.
-"""
+"""A task can be moved, or dropped while still queued; its result or error
+is destroyed exactly once."""
 
 from max.gpu.host import DeviceContext
 from std.memory import ArcPointer
@@ -15,8 +13,8 @@ from tests.common import suspend
 
 @fieldwise_init
 struct _Count(Movable):
-    """A shared counter cell. A struct rather than a bare `ArcPointer`: async
-    functions can't take a register-passable argument by borrow."""
+    """A shared counter; a struct, as async functions can't borrow an
+    `ArcPointer`."""
 
     var _inner: ArcPointer[Int]
 

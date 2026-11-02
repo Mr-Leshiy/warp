@@ -1,9 +1,5 @@
-"""Task handles: a task's coroutine, completion state, and result.
-
-`_CoroutineHandle` and `_RaisingCoroutineHandle` are the typed handles, one
-per coroutine kind; `_TaskHandle` erases their type so the runtime can queue
-any of them.
-"""
+"""Task handles: typed ones per coroutine kind, and the erased
+`_TaskHandle` the runtime queues."""
 
 from .task_handle import (
     _TaskHandle,

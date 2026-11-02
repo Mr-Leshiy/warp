@@ -1,5 +1,4 @@
-"""The part of a task handle shared by every coroutine kind: the coroutine
-itself, where to resume it, and its completion state."""
+"""The part of a task handle shared by every coroutine kind."""
 
 from std.builtin._coroutine import (
     AnyCoroutine,
@@ -17,18 +16,14 @@ from ..completion import (
 
 
 struct _TaskFrame(Movable):
-    """A task's coroutine and its completion state.
-
-    The state lives on the heap, owned by this struct, at the address the
-    coroutine frame points at, so the struct itself is free to move.
-    """
+    """A task's coroutine, its resume point, and its heap-allocated
+    completion state."""
 
     var _handle: AnyCoroutine
     var _resume_at: AnyCoroutine
-    """The frame to resume next: the task's own coroutine, or one it's
-    awaiting that suspended (see `set_resume_at`)."""
+    """The frame to resume next: the task's own, or one it awaits."""
     var _state: OwnedPointer[_CompletionState]
-    """The heap-allocated completion state the coroutine frame points at."""
+    """Heap-allocated, so the frame's pointer to it survives moves."""
 
     def __init__[
         CallbackPayload: Movable & Deinitable = NoneType,
@@ -37,67 +32,43 @@ struct _TaskFrame(Movable):
         var coro_handle: AnyCoroutine,
         var callback: Optional[CompletionCallback[CallbackPayload]],
     ):
-        """Take ownership of a coroutine and install its completion state.
-
-        Its result slot must already be set (`_set_result_slot`).
-
-        Args:
-            coro_handle: The coroutine handle. Ownership is transferred.
-            callback: Called once the coroutine completes, before the task
-                reads as completed. Ownership is transferred.
-        """
+        """Take a coroutine whose result slot is already set, and install its
+        completion state and callback."""
         self._handle = coro_handle
         self._resume_at = self._handle
         self._state = _allocate_completion_state(self._handle, callback^)
 
     def __deinit__(deinit self):
-        """Destroy the coroutine; its completion state is freed after it."""
+        """Destroy the coroutine, then free its completion state."""
         _coro_destroy_fn(self._handle)
 
     def raw(self) -> AnyCoroutine:
-        """Return the task's own coroutine frame. The struct keeps owning it."""
+        """Return the task's own coroutine, still owned by this struct."""
         return self._handle
 
     def set_resume_at(mut self, frame: AnyCoroutine):
-        """Record the frame that suspended, so the next resume picks up there.
-
-        A task suspends in whichever frame hit the yield: its own coroutine or
-        one it's awaiting. Resuming the task's own frame instead would carry
-        it past its `await` as if the awaited coroutine had completed.
-
-        Args:
-            frame: The suspended frame. The task keeps owning it.
-        """
+        """Record the frame that suspended: the task's own, or one it awaits.
+        Resuming any other would skip past the `await`."""
         self._resume_at = frame
 
     def addr(self) -> String:
-        """Return the address of the task's own coroutine frame, for logging."""
+        """Return the task's coroutine address, for logging."""
         return _coroutine_address(self._handle)
 
     def resume_addr(self) -> String:
-        """Return the address of the frame the next resume picks up in, for
-        logging."""
+        """Return the address of the frame to resume next, for logging."""
         return _coroutine_address(self._resume_at)
 
     def resume(self):
-        """Resume the task from the frame it last suspended in."""
+        """Resume the task where it last suspended."""
         _coro_resume_fn(self._resume_at)
 
     def is_completed(self) -> Bool:
-        """Return True once the coroutine has run to completion and its
-        callback, if any, has run."""
+        """Return True once the coroutine and its callback have run."""
         return self._state[].is_completed()
 
 
 def _coroutine_address(hdl: AnyCoroutine) -> String:
-    """Return the address of a coroutine handle, for logging.
-
-    `AnyCoroutine` is an opaque MLIR type, not a pointer, so there's no
-    direct way to read its bits. Taking a `Pointer` to the local `hdl` and
-    reinterpreting *that* as a `Pointer[Int]` gives a view onto the same
-    (pointer-sized) bytes, which can then be read as an address.
-
-    Args:
-        hdl: The coroutine handle to return the address of.
-    """
+    """Return a coroutine's address, for logging, by reading the opaque
+    handle's bytes as an `Int`."""
     return hex(UInt64(Pointer(to=hdl).unsafe_bitcast[Int]()[]))
