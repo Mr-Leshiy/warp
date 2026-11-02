@@ -6,7 +6,7 @@ from std.memory import alloc
 from std.os import abort
 
 from ..completion import CompletionCallback
-from .frame import _TaskCoroutine
+from .frame import _TaskFrame
 from .task_handle import _TypedTaskHandle
 
 
@@ -22,7 +22,7 @@ struct _CoroutineHandle[type: Deinitable & Movable](_TypedTaskHandle):
         type: The type of the coroutine's result.
     """
 
-    var _coro: _TaskCoroutine
+    var _coro: _TaskFrame
     var _result: Pointer[Self.type, MutUntrackedOrigin]
     """Uninitialized until the coroutine completes."""
 
@@ -44,7 +44,7 @@ struct _CoroutineHandle[type: Deinitable & Movable](_TypedTaskHandle):
         """
         self._result = alloc[Self.type](1)
         coro._set_result_slot(self._result)
-        self._coro = _TaskCoroutine(coro^._take_handle(), callback^)
+        self._coro = _TaskFrame(coro^._take_handle(), callback^)
 
     def __deinit__(deinit self):
         """Destroy the result, if the coroutine wrote one, then free its slot.

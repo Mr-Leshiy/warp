@@ -16,7 +16,7 @@ from ..completion import (
 )
 
 
-struct _TaskCoroutine(Movable):
+struct _TaskFrame(Movable):
     """A task's coroutine and its completion state.
 
     The state lives on the heap, owned by this struct, at the address the
