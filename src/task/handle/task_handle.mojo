@@ -63,6 +63,28 @@ struct _TaskHandleVTable(ImplicitlyCopyable, Movable):
         Each entry reads the erased pointer as an `H` unchecked: a
         `_TaskHandle` only ever pairs a vtable with a pointer to the same `H`.
         """
+
+        def _resume[H: _TypedTaskHandle](handle: ErasedOwnedPointer):
+            handle.unsafe_get[H]()[].resume()
+
+        def _set_resume_at[
+            H: _TypedTaskHandle
+        ](handle: ErasedOwnedPointer, frame: AnyCoroutine):
+            handle.unsafe_get[H]()[].set_resume_at(frame)
+
+        def _is_completed[
+            H: _TypedTaskHandle
+        ](handle: ErasedOwnedPointer) -> Bool:
+            return handle.unsafe_get[H]()[].is_completed()
+
+        def _addr[H: _TypedTaskHandle](handle: ErasedOwnedPointer) -> String:
+            return handle.unsafe_get[H]()[].addr()
+
+        def _resume_addr[
+            H: _TypedTaskHandle
+        ](handle: ErasedOwnedPointer) -> String:
+            return handle.unsafe_get[H]()[].resume_addr()
+
         return Self(
             resume=_resume[H],
             set_resume_at=_set_resume_at[H],
@@ -70,28 +92,6 @@ struct _TaskHandleVTable(ImplicitlyCopyable, Movable):
             addr=_addr[H],
             resume_addr=_resume_addr[H],
         )
-
-
-def _resume[H: _TypedTaskHandle](handle: ErasedOwnedPointer):
-    handle.unsafe_get[H]()[].resume()
-
-
-def _set_resume_at[
-    H: _TypedTaskHandle
-](handle: ErasedOwnedPointer, frame: AnyCoroutine):
-    handle.unsafe_get[H]()[].set_resume_at(frame)
-
-
-def _is_completed[H: _TypedTaskHandle](handle: ErasedOwnedPointer) -> Bool:
-    return handle.unsafe_get[H]()[].is_completed()
-
-
-def _addr[H: _TypedTaskHandle](handle: ErasedOwnedPointer) -> String:
-    return handle.unsafe_get[H]()[].addr()
-
-
-def _resume_addr[H: _TypedTaskHandle](handle: ErasedOwnedPointer) -> String:
-    return handle.unsafe_get[H]()[].resume_addr()
 
 
 struct _TaskHandle(Movable):
