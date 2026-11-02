@@ -1,12 +1,19 @@
-"""A task can be moved, or dropped while still queued; its result or error
-is destroyed exactly once."""
+"""A task can be moved, dropped while still queued, or dropped by its own
+completion callback; its result or error is destroyed exactly once."""
 
 from max.gpu.host import DeviceContext
+from std.collections.optional import Optional
 from std.memory import ArcPointer
-from std.testing import TestSuite, assert_equal, assert_raises
+from std.testing import TestSuite, assert_equal, assert_false, assert_raises
 
 from warp.context import Context
 from warp.runtime import Runtime
+from warp.task import CompletionCallback
+from warp.task.handle import (
+    _CoroutineHandle,
+    _RaisingCoroutineHandle,
+    _TaskHandle,
+)
 
 from tests.common import suspend
 
@@ -44,6 +51,79 @@ __async def _suspends_then_maybe_raises(
     if should_raise:
         raise Error("boom")
     return value^
+
+
+__async def _returns(count: _Count) -> _DropCounter:
+    return _DropCounter(count._inner.copy())
+
+
+__async def _maybe_raises(
+    count: _Count, should_raise: Bool
+) raises -> _DropCounter:
+    if should_raise:
+        raise Error("boom")
+    return _DropCounter(count._inner.copy())
+
+
+comptime _HandleSlot = ArcPointer[Optional[_TaskHandle]]
+"""Holds the only reference to a task handle, for its own completion callback
+to drop."""
+
+
+def _drop_handle(slot: _HandleSlot):
+    """A completion callback that drops its own task's handle."""
+    slot[] = None
+
+
+def _drop_handle_callback(
+    slot: _HandleSlot,
+) -> Optional[CompletionCallback[_HandleSlot]]:
+    return Optional(CompletionCallback[_HandleSlot](_drop_handle, slot.copy()))
+
+
+def test_handle_dropped_by_its_callback_drops_its_result() raises:
+    var count = _Count(ArcPointer(0))
+    var slot = _HandleSlot(Optional[_TaskHandle](None))
+    slot[] = _TaskHandle(
+        _CoroutineHandle[_DropCounter](
+            _returns(count), _drop_handle_callback(slot)
+        )
+    )
+
+    # Runs to completion: the result is written, then the callback drops the
+    # handle before the handle's completion flag is set.
+    slot[].value().resume_coroutine()
+    assert_false(Bool(slot[]))
+    assert_equal(count._inner[], 1)
+
+
+def test_raising_handle_dropped_by_its_callback_drops_its_result() raises:
+    var count = _Count(ArcPointer(0))
+    var slot = _HandleSlot(Optional[_TaskHandle](None))
+    slot[] = _TaskHandle(
+        _RaisingCoroutineHandle[_DropCounter](
+            _maybe_raises(count, False), _drop_handle_callback(slot)
+        )
+    )
+
+    slot[].value().resume_coroutine()
+    assert_false(Bool(slot[]))
+    assert_equal(count._inner[], 1)
+
+
+def test_raising_handle_dropped_by_its_callback_drops_its_error() raises:
+    var count = _Count(ArcPointer(0))
+    var slot = _HandleSlot(Optional[_TaskHandle](None))
+    slot[] = _TaskHandle(
+        _RaisingCoroutineHandle[_DropCounter](
+            _maybe_raises(count, True), _drop_handle_callback(slot)
+        )
+    )
+
+    # Only the error was written: the unwritten result slot isn't dropped.
+    slot[].value().resume_coroutine()
+    assert_false(Bool(slot[]))
+    assert_equal(count._inner[], 0)
 
 
 def test_moved_task_still_returns_its_result() raises:

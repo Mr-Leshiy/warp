@@ -36,7 +36,9 @@ struct _RaisingCoroutineHandle[type: Deinitable & Movable](_TypedTaskHandle):
 
     def __deinit__(deinit self):
         """Destroy whichever slot was written, if any, and free both."""
-        if self._coro.is_completed():
+        # Not `is_completed`: that's set only once the callback returns, and
+        # the handle may be dropped while it runs.
+        if self._coro.is_done():
             if self.has_error():
                 self._error.unsafe_deinit_pointee()
             else:
@@ -53,7 +55,7 @@ struct _RaisingCoroutineHandle[type: Deinitable & Movable](_TypedTaskHandle):
     def take_result(deinit self) raises -> Self.type:
         """Consume the handle and return the result, or raise the error.
         Aborts unless the coroutine has completed."""
-        if not self._coro.is_completed():
+        if not self._coro.is_done():
             abort("bug: took the result of a coroutine that hasn't completed")
         if self.has_error():
             var error = self._error.unsafe_take_pointee()

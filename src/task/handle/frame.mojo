@@ -63,6 +63,11 @@ struct _TaskFrame(Movable):
         """Resume the task where it last suspended."""
         _coro_resume_fn(self._resume_at)
 
+    def is_done(self) -> Bool:
+        """Return True once the coroutine has finished, so its result or
+        error is written, even while its callback is still running."""
+        return self._state[].is_done()
+
     def is_completed(self) -> Bool:
         """Return True once the coroutine and its callback have run."""
         return self._state[].is_completed()

@@ -72,28 +72,50 @@ struct CompletionCallback[CallbackPayload: Movable & Deinitable = NoneType](
 
 
 struct _CompletionState(Movable):
-    """Whether a task's coroutine has completed, and the user callback, if
-    any, still to run when it does.
+    """Whether a task's coroutine has finished, whether its user callback, if
+    any, has run, and that callback while it's still to run.
 
-    The coroutine frame's completion hook, `_on_completion`, runs the
-    callback and then raises the flag. Lives on the heap, owned by a
-    `_TaskFrame`.
+    The coroutine frame's completion hook, `_on_completion`, raises `done`,
+    runs the callback, and then raises `completed`. Lives on the heap, owned
+    by a `_TaskFrame`.
     """
 
+    var done: _COMPLETED_FLAG_TYPE
+    """Set once the coroutine has finished, so its result (or error) slot is
+    written, before the callback runs. Decides whether that slot needs
+    destroying."""
     var completed: _COMPLETED_FLAG_TYPE
+    """Set once the callback has run too."""
     var callback: Optional[ErasedOwnedPointer]
     """The `CompletionCallback`, its payload type erased: only
-    `_on_completion`, installed alongside it, knows that type."""
+    `_on_completion`, installed alongside it, knows that type. Moved out by
+    `_on_completion` before it's called."""
+    var _dropped: Optional[Pointer[Bool, MutUntrackedOrigin]]
+    """While the callback runs, `_on_completion`'s flag to raise if this state
+    is destroyed under it: the callback may drop the last reference to the
+    task's handle, and with it this state."""
 
     def __init__(out self, var callback: Optional[ErasedOwnedPointer]):
-        """Initialize a state with the flag cleared.
+        """Initialize a state with both flags cleared.
 
         Args:
-            callback: Run on completion, before the flag is set. Ownership is
-                transferred.
+            callback: Run on completion, before `completed` is set. Ownership
+                is transferred.
         """
+        self.done = _COMPLETED_FLAG_TYPE(0)
         self.completed = _COMPLETED_FLAG_TYPE(0)
         self.callback = callback^
+        self._dropped = None
+
+    def __deinit__(deinit self):
+        """Tell a running `_on_completion`, if any, that this state is gone."""
+        if self._dropped:
+            self._dropped.value()[] = True
+
+    def is_done(self) -> Bool:
+        """Return whether the coroutine has finished, and so written its
+        result or error, whether or not its callback has run yet."""
+        return self.done.load() != 0
 
     def is_completed(self) -> Bool:
         """Return whether the coroutine has completed and its callback ran."""
@@ -122,10 +144,25 @@ def _allocate_completion_state[
     """
 
     def _on_completion(state: _CompletionStatePtr):
+        # The coroutine has written its result (or error) by now. Say so
+        # before the callback runs, so a handle dropped during the callback
+        # still destroys it.
+        state[].done.store(1)
+        if state[].callback:
+            # Moved out, so the callback and its payload outlive the state if
+            # the callback drops the task's handle.
+            var callback = state[].callback.take()
+            var dropped = False
+            state[]._dropped = Pointer(to=dropped).unsafe_origin_cast[
+                MutUntrackedOrigin
+            ]()
+            _completion_callback[CallbackPayload](callback)[]()
+            if dropped:
+                # The state is freed: nothing is left to mark completed.
+                return
+            state[]._dropped = None
         # The callback runs first, so by the time the flag reads as set,
         # it has already finished.
-        if state[].callback:
-            _completion_callback[CallbackPayload](state[].callback.value())[]()
         state[].completed.store(1)
 
     var erased = Optional[ErasedOwnedPointer]()
