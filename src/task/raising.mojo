@@ -43,11 +43,14 @@ struct RaisingTask[
             The error the coroutine raised, if any.
         """
 
-        @__parameter
-        def completed() -> Bool:
-            return self.is_completed()
+        ref handle = self._handle
 
-        self._runtime[].wait_until[completed]()
+        def completed() {imm handle} -> Bool:
+            return handle[].is_completed()
+
+        # A copy, so running the runtime doesn't alias `self` borrowed above.
+        var runtime = self._runtime.copy()
+        runtime[].wait_until(completed)
 
         return (
             unsafe_arc_take(self._handle^)

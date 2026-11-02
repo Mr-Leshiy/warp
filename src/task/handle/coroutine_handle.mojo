@@ -2,9 +2,9 @@
 
 from std.builtin._coroutine import AnyCoroutine, Coroutine
 from std.collections.optional import Optional
-from std.memory import alloc
 from std.os import abort
 
+from ...utils import alloc_one, free_one
 from ..completion import CompletionCallback
 from .frame import _TaskFrame
 from .task_handle import _TypedTaskHandle
@@ -27,7 +27,7 @@ struct _CoroutineHandle[type: Deinitable & Movable](_TypedTaskHandle):
         var callback: Optional[CompletionCallback[CallbackPayload]],
     ):
         """Take a coroutine and point it at this handle's result slot."""
-        self._result = alloc[Self.type](1)
+        self._result = alloc_one[Self.type]()
         coro._set_result_slot(self._result)
         self._coro = _TaskFrame(coro^._take_handle(), callback^)
 
@@ -37,7 +37,7 @@ struct _CoroutineHandle[type: Deinitable & Movable](_TypedTaskHandle):
         # the handle may be dropped while it runs.
         if self._coro.is_done():
             self._result.unsafe_deinit_pointee()
-        self._result.unsafe_free()
+        free_one(self._result)
 
     def take_result(deinit self) -> Self.type:
         """Consume the handle and return the result. Aborts unless the
@@ -45,7 +45,7 @@ struct _CoroutineHandle[type: Deinitable & Movable](_TypedTaskHandle):
         if not self._coro.is_done():
             abort("bug: took the result of a coroutine that hasn't completed")
         var result = self._result.unsafe_take_pointee()
-        self._result.unsafe_free()
+        free_one(self._result)
         return result^
 
     def resume(self):

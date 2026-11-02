@@ -1,6 +1,6 @@
-from std.memory import alloc
 from std.memory.owned_pointer import OwnedPointer
 
+from .memory import alloc_one, free_one
 from .type_id import TypeId
 
 comptime _ErasedPtr = MutOpaquePointer[MutUntrackedOrigin]
@@ -42,7 +42,7 @@ struct ErasedOwnedPointer(Movable):
         Write the value through `get` before the pointer is read from or
         dropped: dropping it runs `T`'s destructor over whatever is there.
         """
-        self._ptr = alloc[T](1).unsafe_bitcast[NoneType]()
+        self._ptr = alloc_one[T]().unsafe_bitcast[NoneType]()
         self._deinit = _ptr_deinit[T]
         self._type_id = TypeId.of[T]()
 
@@ -97,7 +97,7 @@ struct ErasedOwnedPointer(Movable):
             raise error
         var typed = self._ptr.unsafe_bitcast[T]()
         var value = typed.unsafe_take_pointee()
-        typed.unsafe_free()
+        free_one(typed)
         return value^
 
 
@@ -125,4 +125,4 @@ def _ptr_deinit[T: Movable & Deinitable](ptr: _ErasedPtr):
     """Destroy and free a heap-allocated `T` behind a type-erased pointer."""
     var typed = ptr.unsafe_bitcast[T]()
     typed.unsafe_deinit_pointee()
-    typed.unsafe_free()
+    free_one(typed)
