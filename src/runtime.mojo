@@ -55,7 +55,7 @@ struct Runtime(Copyable):
             handle: The coroutine to run. Ownership is transferred.
         """
         task = Task(handle^, self._inner.copy())
-        self._inner[].add(task.handle())
+        self._inner[].add(task._handle.copy())
 
     def add[
         type: Deinitable & Movable, origins: OriginSet
@@ -73,7 +73,7 @@ struct Runtime(Copyable):
             handle: The raising coroutine to run. Ownership is transferred.
         """
         task = RaisingTask(handle^, self._inner.copy())
-        self._inner[].add(task.handle())
+        self._inner[].add(task._handle.copy())
 
     def wait(self):
         """Run queued tasks until all have completed, then sync the device."""

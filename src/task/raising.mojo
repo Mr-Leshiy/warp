@@ -58,7 +58,3 @@ struct RaisingTask[
     def is_completed(self) -> Bool:
         """Return True once the coroutine has completed."""
         return self._handle[].is_completed()
-
-    def handle(self) -> ArcPointer[_TaskHandle]:
-        """Return a new reference to this task's handle, for queueing."""
-        return self._handle.copy()
