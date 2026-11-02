@@ -1,5 +1,23 @@
-from std.memory import ArcPointer
+from std.memory import ArcPointer, Layout, alloc
 from std.os import abort
+from std.sys import size_of
+
+
+@always_inline
+def alloc_one[T: AnyType]() -> Pointer[T, MutUntrackedOrigin]:
+    """Allocate uninitialized room for one `T` on the heap.
+
+    Free it with `free_one`: a zero-sized `T` gets a dangling pointer that
+    `unsafe_free` can't take.
+    """
+    return alloc(Layout[T](count=1)).unsafe_leak()
+
+
+@always_inline
+def free_one[T: AnyType](ptr: Pointer[T, MutUntrackedOrigin]):
+    """Free room allocated by `alloc_one`, without destroying the value."""
+    comptime if size_of[T]() != 0:
+        ptr.unsafe_free()
 
 
 def unsafe_arc_take[T: Movable & Deinitable](var arc: ArcPointer[T]) -> T:

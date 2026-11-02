@@ -2,9 +2,9 @@
 
 from std.builtin._coroutine import AnyCoroutine, RaisingCoroutine
 from std.collections.optional import Optional
-from std.memory import alloc
 from std.os import abort
 
+from ...utils import alloc_one, free_one
 from ..completion import CompletionCallback
 from .frame import _TaskFrame
 from .task_handle import _TypedTaskHandle
@@ -29,8 +29,8 @@ struct _RaisingCoroutineHandle[type: Deinitable & Movable](_TypedTaskHandle):
         var callback: Optional[CompletionCallback[CallbackPayload]],
     ):
         """Take a raising coroutine and point it at this handle's slots."""
-        self._result = alloc[Self.type](1)
-        self._error = alloc[Error](1)
+        self._result = alloc_one[Self.type]()
+        self._error = alloc_one[Error]()
         coro._set_result_slot(self._result, self._error)
         self._coro = _TaskFrame(coro^._take_handle(), callback^)
 
@@ -41,8 +41,8 @@ struct _RaisingCoroutineHandle[type: Deinitable & Movable](_TypedTaskHandle):
                 self._error.unsafe_deinit_pointee()
             else:
                 self._result.unsafe_deinit_pointee()
-        self._result.unsafe_free()
-        self._error.unsafe_free()
+        free_one(self._result)
+        free_one(self._error)
 
     def has_error(self) -> Bool:
         """Return True if the completed coroutine raised."""
@@ -57,12 +57,12 @@ struct _RaisingCoroutineHandle[type: Deinitable & Movable](_TypedTaskHandle):
             abort("bug: took the result of a coroutine that hasn't completed")
         if self.has_error():
             var error = self._error.unsafe_take_pointee()
-            self._result.unsafe_free()
-            self._error.unsafe_free()
+            free_one(self._result)
+            free_one(self._error)
             raise error^
         var result = self._result.unsafe_take_pointee()
-        self._result.unsafe_free()
-        self._error.unsafe_free()
+        free_one(self._result)
+        free_one(self._error)
         return result^
 
     def resume(self):
