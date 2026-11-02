@@ -184,14 +184,13 @@ struct _RuntimeInner:
     def wait(mut self):
         """Run queued coroutines until all have completed."""
 
-        @__parameter
-        def never() -> Bool:
+        def never() {} -> Bool:
             return False
 
-        self.wait_until[never]()
+        self.wait_until(never)
 
     @no_inline
-    def wait_until[predicate: def() thin capturing -> Bool](mut self):
+    def wait_until(mut self, predicate: Some[def() -> Bool]):
         """Run queued coroutines until `predicate` holds or the queue empties.
 
         Synchronizes the device lazily: once, right before resuming the
