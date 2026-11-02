@@ -38,9 +38,12 @@ __async def _suspends_then_maybe_raises(
     ctx: Context, count: _Count, should_raise: Bool
 ) raises -> _DropCounter:
     __await suspend(ctx)
+    # Built before raising, so on the error path this local is dropped once
+    # while unwinding, and the unwritten result slot must not be dropped.
+    var value = _DropCounter(count._inner.copy())
     if should_raise:
         raise Error("boom")
-    return _DropCounter(count._inner.copy())
+    return value^
 
 
 def test_moved_task_still_returns_its_result() raises:
@@ -89,10 +92,10 @@ def test_raising_task_dropped_before_completion_drops_its_error() raises:
         var count = _Count(ArcPointer(0))
 
         _ = runtime.add(_suspends_then_maybe_raises(context, count, True))
-        # The error is dropped with the handle; the result slot was never
-        # written, so nothing runs `_DropCounter`'s destructor.
+        # Only the unwound local counts: the error is dropped with the handle,
+        # and the unwritten result slot isn't.
         runtime.wait()
-        assert_equal(count._inner[], 0)
+        assert_equal(count._inner[], 1)
 
 
 def test_moved_raising_task_still_raises_its_error() raises:
@@ -107,7 +110,23 @@ def test_moved_raising_task_still_raises_its_error() raises:
         var moved = task^
         with assert_raises(contains="boom"):
             _ = moved^.wait()
+        assert_equal(count._inner[], 1)
+
+
+def test_raising_task_returns_its_result() raises:
+    with DeviceContext() as ctx:
+        var runtime = Runtime(ctx)
+        var context = runtime.context()
+        var count = _Count(ArcPointer(0))
+
+        var task = runtime.add(
+            _suspends_then_maybe_raises(context, count, False)
+        )
+        var result = task^.wait()
         assert_equal(count._inner[], 0)
+
+        _ = result^
+        assert_equal(count._inner[], 1)
 
 
 def test_task_never_run_drops_nothing() raises:
