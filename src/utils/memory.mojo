@@ -10,7 +10,7 @@ def alloc_one[T: AnyType]() -> Pointer[T, MutUntrackedOrigin]:
     Free it with `free_one`: a zero-sized `T` gets a dangling pointer that
     `unsafe_free` can't take.
     """
-    return alloc(Layout[T](count=1)).unsafe_leak()
+    return alloc(Layout[T](length=1)).unsafe_leak()
 
 
 @always_inline
