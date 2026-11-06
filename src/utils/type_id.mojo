@@ -1,6 +1,7 @@
 from std.reflection import reflect
 
 
+@fieldwise_init
 struct TypeId(Equatable, ImplicitlyCopyable, Writable):
     """Identifies a type at runtime.
 
@@ -16,12 +17,6 @@ struct TypeId(Equatable, ImplicitlyCopyable, Writable):
     def of[T: AnyType]() -> Self:
         """Return the id of `T`."""
         return Self(_id=hash(reflect[T].name()))
-
-    def __init__(out self, *, _id: UInt64):
-        self._id = _id
-
-    def __eq__(self, other: Self) -> Bool:
-        return self._id == other._id
 
     def write_to(self, mut writer: Some[Writer]):
         """Write the id as `TypeId(<hash>)`, for logging.
