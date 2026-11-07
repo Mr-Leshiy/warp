@@ -1,7 +1,7 @@
-from max.gpu.host import DeviceContext
 from std.testing import TestSuite, assert_equal, assert_false
 
 from warp.runtime import Runtime
+from tests.common import CpuDeviceContext
 
 
 # Neither test here drives a task to completion via a real yield -- what's
@@ -14,7 +14,7 @@ __async def _no_yield(value: Int) -> Int:
 
 
 def test_runtime_wait_on_empty_queue_and_called_twice() raises:
-    with DeviceContext() as ctx:
+    with CpuDeviceContext() as ctx:
         var runtime = Runtime(ctx)
 
         runtime.wait()
@@ -29,7 +29,7 @@ def test_runtime_wait_on_empty_queue_and_called_twice() raises:
 
 
 def test_runtime_dropped_with_task_still_queued() raises:
-    with DeviceContext() as ctx:
+    with CpuDeviceContext() as ctx:
         var runtime = Runtime(ctx)
 
         # Queued but never driven: neither `task.wait()` nor

@@ -2,13 +2,12 @@
 immediately, after suspending, or from a nested coroutine.
 """
 
-from max.gpu.host import DeviceContext
 from std.testing import TestSuite, assert_raises
 
 from warp.context import Context
 from warp.runtime import Runtime
 
-from tests.common import suspend
+from tests.common import CpuDeviceContext, suspend
 
 
 __async def _raises_immediately() raises -> Int:
@@ -16,7 +15,7 @@ __async def _raises_immediately() raises -> Int:
 
 
 def test_raising_task_raises_immediately() raises:
-    with DeviceContext() as ctx:
+    with CpuDeviceContext() as ctx:
         var runtime = Runtime(ctx)
         var task = runtime.add(_raises_immediately())
         with assert_raises(contains="immediate failure"):
@@ -30,7 +29,7 @@ __async def _raises_after_yields(ctx: Context) raises -> Int:
 
 
 def test_raising_task_raises_after_yields() raises:
-    with DeviceContext() as ctx:
+    with CpuDeviceContext() as ctx:
         var runtime = Runtime(ctx)
         var context = runtime.context()
         var task = runtime.add(_raises_after_yields(context))
@@ -50,7 +49,7 @@ __async def _raises_from_nested_coroutine(ctx: Context) raises -> Int:
 
 
 def test_raising_task_raises_from_nested_coroutine() raises:
-    with DeviceContext() as ctx:
+    with CpuDeviceContext() as ctx:
         var runtime = Runtime(ctx)
         var context = runtime.context()
         var task = runtime.add(_raises_from_nested_coroutine(context))
@@ -59,7 +58,7 @@ def test_raising_task_raises_from_nested_coroutine() raises:
 
 
 def test_raising_task_runtime_wait_raises_immediately() raises:
-    with DeviceContext() as ctx:
+    with CpuDeviceContext() as ctx:
         var runtime = Runtime(ctx)
         var task = runtime.add(_raises_immediately())
 
@@ -69,7 +68,7 @@ def test_raising_task_runtime_wait_raises_immediately() raises:
 
 
 def test_raising_task_runtime_wait_raises_after_yields() raises:
-    with DeviceContext() as ctx:
+    with CpuDeviceContext() as ctx:
         var runtime = Runtime(ctx)
         var context = runtime.context()
         var task = runtime.add(_raises_after_yields(context))
@@ -80,7 +79,7 @@ def test_raising_task_runtime_wait_raises_after_yields() raises:
 
 
 def test_raising_task_runtime_wait_raises_from_nested_coroutine() raises:
-    with DeviceContext() as ctx:
+    with CpuDeviceContext() as ctx:
         var runtime = Runtime(ctx)
         var context = runtime.context()
         var task = runtime.add(_raises_from_nested_coroutine(context))
