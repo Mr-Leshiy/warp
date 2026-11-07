@@ -1,6 +1,7 @@
 from std.builtin._coroutine import RaisingCoroutine
 from std.collections.optional import Optional
 from std.memory import ArcPointer
+from std.sys.info import CompilationTarget
 
 from ..runtime import _RuntimeInner
 from ..utils import unsafe_arc_take
@@ -11,17 +12,18 @@ from .handle import _RaisingCoroutineHandle, _TaskHandle
 struct RaisingTask[
     type: Deinitable & Movable,
     origins: OriginSet,
+    target: CompilationTarget,
     CallbackPayload: Movable & Deinitable = NoneType,
 ](Movable):
     """A raising coroutine queued on a `Runtime`, and its result or error."""
 
-    var _runtime: ArcPointer[_RuntimeInner]
+    var _runtime: ArcPointer[_RuntimeInner[Self.target]]
     var _handle: ArcPointer[_TaskHandle]
 
     def __init__(
         out self,
         var coro: RaisingCoroutine[Self.type, Self.origins],
-        var runtime: ArcPointer[_RuntimeInner],
+        var runtime: ArcPointer[_RuntimeInner[Self.target]],
         var callback: Optional[CompletionCallback[Self.CallbackPayload]] = None,
     ):
         """Initialize a task with a raising coroutine.

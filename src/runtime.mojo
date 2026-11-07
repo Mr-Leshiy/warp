@@ -10,6 +10,7 @@ from std.collections import Deque
 from std.collections.optional import Optional
 from std.memory import ArcPointer, OwnedPointer
 from std.os import abort
+from std.sys.info import CompilationTarget
 
 from .context import Context
 from .task import RaisingTask, Task
@@ -18,7 +19,7 @@ from .task.handle import _TaskHandle
 
 # TODO: revisit `Copyable` (added so tests can hand coroutines their own
 # runtime handle); consider making `Runtime` `Movable` only again.
-struct Runtime(Copyable):
+struct Runtime[target: CompilationTarget](Copyable):
     """Runs coroutines that share one GPU device context.
 
     Tasks are queued by `add` and only make progress inside `wait`, which
@@ -26,9 +27,9 @@ struct Runtime(Copyable):
     the same queue and device context.
     """
 
-    var _inner: ArcPointer[_RuntimeInner]
+    var _inner: ArcPointer[_RuntimeInner[Self.target]]
 
-    def __init__(out self, ctx: DeviceContext):
+    def __init__(out self, ctx: DeviceContext[Self.target]):
         """Initialize a runtime running its tasks on the given device.
 
         Args:
@@ -36,7 +37,7 @@ struct Runtime(Copyable):
         """
         self._inner = ArcPointer(_RuntimeInner(ctx))
 
-    def context(self) -> Context:
+    def context(self) -> Context[Self.target]:
         """Return a context that coroutines use to reach this runtime."""
         return Context(self._inner.copy())
 
@@ -45,7 +46,7 @@ struct Runtime(Copyable):
     ](
         mut self,
         var handle: Coroutine[type, origins],
-        out task: Task[type, origins],
+        out task: Task[type, origins, Self.target],
     ):
         """Queue a coroutine and return the task tracking it.
 
@@ -62,7 +63,7 @@ struct Runtime(Copyable):
     ](
         mut self,
         var handle: RaisingCoroutine[type, origins],
-        out task: RaisingTask[type, origins],
+        out task: RaisingTask[type, origins, Self.target],
     ):
         """Queue a raising coroutine and return the task tracking it.
 
@@ -119,8 +120,8 @@ struct Runtime(Copyable):
         return task^.wait()
 
 
-struct _RuntimeInner:
-    var _ctx: DeviceContext
+struct _RuntimeInner[target: CompilationTarget]:
+    var _ctx: DeviceContext[Self.target]
 
     # The queue has to stay behind a pointer. `wait` takes `mut self` — an
     # exclusive, `noalias` borrow — yet a coroutine it resumes reaches this
@@ -145,7 +146,7 @@ struct _RuntimeInner:
     # task's frames suspended.
     var _current: OwnedPointer[Optional[ArcPointer[_TaskHandle]]]
 
-    def __init__(out self, ctx: DeviceContext):
+    def __init__(out self, ctx: DeviceContext[Self.target]):
         """Initialize the shared state with an empty queue.
 
         Args:
