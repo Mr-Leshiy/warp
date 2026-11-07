@@ -1,5 +1,6 @@
 from max.gpu.host import DeviceBuffer, DeviceContext, HostBuffer
 from max.gpu import global_idx
+from std.sys import has_accelerator
 from std.testing import TestSuite, assert_equal
 
 from warp.context import Context
@@ -145,4 +146,7 @@ def test_synchronize_scales_to_many_concurrent_gpu_tasks() raises:
 
 
 def main() raises:
-    TestSuite.discover_tests[__functions_in_module()]().run()
+    # These tests launch real device kernels, so without an accelerator they
+    # aren't instantiated (they wouldn't build) and nothing runs.
+    comptime if has_accelerator():
+        TestSuite.discover_tests[__functions_in_module()]().run()
