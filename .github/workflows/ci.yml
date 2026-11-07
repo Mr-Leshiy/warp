@@ -6,8 +6,8 @@ on:
   pull_request:
 
 jobs:
-  fmt:
-    name: Format check
+  check:
+    name: Format check and tests
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -24,3 +24,8 @@ jobs:
 
       - name: Assert no uncommitted formatting changes
         run: git diff --exit-code
+
+      # Runs even if the format check failed.
+      - name: Run tests
+        if: ${{ !cancelled() }}
+        run: pixi run test
