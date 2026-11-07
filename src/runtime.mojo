@@ -17,14 +17,12 @@ from .task import RaisingTask, Task
 from .task.handle import _TaskHandle
 
 
-# TODO: revisit `Copyable` (added so tests can hand coroutines their own
-# runtime handle); consider making `Runtime` `Movable` only again.
-struct Runtime[target: CompilationTarget](Copyable):
+struct Runtime[target: CompilationTarget](Movable):
     """Runs coroutines that share one GPU device context.
 
     Tasks are queued by `add` and only make progress inside `wait`, which
-    resumes them in turn until every one of them has completed. Copies share
-    the same queue and device context.
+    resumes them in turn until every one of them has completed. A runtime can
+    be moved but not copied; coroutines reach it through a `Context`.
     """
 
     var _inner: ArcPointer[_RuntimeInner[Self.target]]
