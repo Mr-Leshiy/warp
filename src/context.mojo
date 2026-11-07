@@ -8,17 +8,18 @@ from std.builtin._coroutine import (
 )
 from std.collections import Deque
 from std.memory import ArcPointer
+from std.sys.info import CompilationTarget
 
 from .runtime import _RuntimeInner
 from .coros import _spawn_synchronize_coro
 
 
-struct Context(Movable):
+struct Context[target: CompilationTarget](Movable):
     """A coroutine's handle on the runtime running it and on its device."""
 
-    var _runtime: ArcPointer[_RuntimeInner]
+    var _runtime: ArcPointer[_RuntimeInner[Self.target]]
 
-    def __init__(out self, var runtime: ArcPointer[_RuntimeInner]):
+    def __init__(out self, var runtime: ArcPointer[_RuntimeInner[Self.target]]):
         """Initialize a context bound to the given runtime.
 
         Args:
@@ -26,7 +27,7 @@ struct Context(Movable):
         """
         self._runtime = runtime^
 
-    def gpu_ctx(self) -> DeviceContext:
+    def gpu_ctx(self) -> DeviceContext[Self.target]:
         """Return the device context shared by every task on this runtime."""
         return self._runtime[]._ctx
 

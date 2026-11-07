@@ -1,14 +1,13 @@
 """A task can be moved, or dropped while still queued; its result or error
 is destroyed exactly once."""
 
-from max.gpu.host import DeviceContext
 from std.memory import ArcPointer
 from std.testing import TestSuite, assert_equal, assert_raises
 
 from warp.context import Context
 from warp.runtime import Runtime
 
-from tests.common import suspend
+from tests.common import CpuDeviceContext, suspend
 
 
 @fieldwise_init
@@ -47,7 +46,7 @@ __async def _suspends_then_maybe_raises(
 
 
 def test_moved_task_still_returns_its_result() raises:
-    with DeviceContext() as ctx:
+    with CpuDeviceContext() as ctx:
         var runtime = Runtime(ctx)
         var context = runtime.context()
         var count = _Count(ArcPointer(0))
@@ -62,7 +61,7 @@ def test_moved_task_still_returns_its_result() raises:
 
 
 def test_task_dropped_before_completion_drops_its_result_once() raises:
-    with DeviceContext() as ctx:
+    with CpuDeviceContext() as ctx:
         var runtime = Runtime(ctx)
         var context = runtime.context()
         var count = _Count(ArcPointer(0))
@@ -75,7 +74,7 @@ def test_task_dropped_before_completion_drops_its_result_once() raises:
 
 
 def test_raising_task_dropped_before_completion_drops_its_result_once() raises:
-    with DeviceContext() as ctx:
+    with CpuDeviceContext() as ctx:
         var runtime = Runtime(ctx)
         var context = runtime.context()
         var count = _Count(ArcPointer(0))
@@ -86,7 +85,7 @@ def test_raising_task_dropped_before_completion_drops_its_result_once() raises:
 
 
 def test_raising_task_dropped_before_completion_drops_its_error() raises:
-    with DeviceContext() as ctx:
+    with CpuDeviceContext() as ctx:
         var runtime = Runtime(ctx)
         var context = runtime.context()
         var count = _Count(ArcPointer(0))
@@ -99,7 +98,7 @@ def test_raising_task_dropped_before_completion_drops_its_error() raises:
 
 
 def test_moved_raising_task_still_raises_its_error() raises:
-    with DeviceContext() as ctx:
+    with CpuDeviceContext() as ctx:
         var runtime = Runtime(ctx)
         var context = runtime.context()
         var count = _Count(ArcPointer(0))
@@ -114,7 +113,7 @@ def test_moved_raising_task_still_raises_its_error() raises:
 
 
 def test_raising_task_returns_its_result() raises:
-    with DeviceContext() as ctx:
+    with CpuDeviceContext() as ctx:
         var runtime = Runtime(ctx)
         var context = runtime.context()
         var count = _Count(ArcPointer(0))
@@ -131,7 +130,7 @@ def test_raising_task_returns_its_result() raises:
 
 def test_task_never_run_drops_nothing() raises:
     var count = _Count(ArcPointer(0))
-    with DeviceContext() as ctx:
+    with CpuDeviceContext() as ctx:
         var runtime = Runtime(ctx)
         var context = runtime.context()
         _ = runtime.add(_suspends_then_returns(context, count))

@@ -3,13 +3,12 @@ value or re-raises its error, including a root that spawns and waits on
 other tasks.
 """
 
-from max.gpu.host import DeviceContext
 from std.testing import TestSuite, assert_equal, assert_raises
 
 from warp.context import Context
 from warp.runtime import Runtime
 
-from tests.common import suspend
+from tests.common import CpuDeviceContext, suspend
 
 
 __async def _yields_twice[VALUE: Int](ctx: Context) -> Int:
@@ -32,14 +31,14 @@ __async def _spawns_and_waits(runtime: Runtime, ctx: Context) raises -> Int:
 
 
 def test_block_on_returns_value() raises:
-    with DeviceContext() as ctx:
+    with CpuDeviceContext() as ctx:
         var runtime = Runtime(ctx)
         var context = runtime.context()
         assert_equal(runtime.block_on(_yields_twice[7](context)), 7)
 
 
 def test_block_on_reraises_error() raises:
-    with DeviceContext() as ctx:
+    with CpuDeviceContext() as ctx:
         var runtime = Runtime(ctx)
         var context = runtime.context()
         with assert_raises(contains="root failure"):
@@ -47,7 +46,7 @@ def test_block_on_reraises_error() raises:
 
 
 def test_block_on_root_spawns_and_waits_on_other_tasks() raises:
-    with DeviceContext() as ctx:
+    with CpuDeviceContext() as ctx:
         var runtime = Runtime(ctx)
         var spawner = runtime.copy()
         var context = runtime.context()

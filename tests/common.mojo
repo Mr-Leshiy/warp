@@ -2,7 +2,13 @@
 
 from std.builtin._coroutine import AnyCoroutine, _suspend_async
 
+from max.gpu.host import DeviceContext
+from std.sys.info import CompilationTarget
+
 from warp.context import Context
+
+# The device context the tests run on, so they don't need a GPU.
+comptime CpuDeviceContext = DeviceContext[CompilationTarget()]
 
 
 __async def suspend(ctx: Context):

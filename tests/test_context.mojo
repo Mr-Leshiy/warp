@@ -1,4 +1,3 @@
-from max.gpu.host import DeviceContext
 from std.testing import (
     TestSuite,
     assert_equal,
@@ -9,6 +8,7 @@ from std.testing import (
 
 from warp.context import Context
 from warp.runtime import Runtime
+from tests.common import CpuDeviceContext
 
 
 __async def _yield_once(context: Context) -> Int:
@@ -18,7 +18,7 @@ __async def _yield_once(context: Context) -> Int:
 
 def test_awaiting_context_from_a_different_runtime_does_not_complete_the_task() raises:
     def __inner__() raises -> None:
-        with DeviceContext() as ctx:
+        with CpuDeviceContext() as ctx:
             var runtime1 = Runtime(ctx)
             var runtime2 = Runtime(ctx)
             var context2 = runtime2.context()

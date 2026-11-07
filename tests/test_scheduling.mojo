@@ -6,14 +6,13 @@ state, completion -- never on the runtime's internal resume order, which
 is an implementation detail, not a contract.
 """
 
-from max.gpu.host import DeviceContext
 from std.memory import OwnedPointer
 from std.testing import TestSuite, assert_equal, assert_true
 
 from warp.context import Context
 from warp.runtime import Runtime
 
-from tests.common import suspend
+from tests.common import CpuDeviceContext, suspend
 
 
 __async def _yield_once(ctx: Context) -> Int:
@@ -29,7 +28,7 @@ __async def _yields_twice[VALUE: Int](ctx: Context) -> Int:
 
 
 def test_tasks_complete_independently() raises:
-    with DeviceContext() as ctx:
+    with CpuDeviceContext() as ctx:
         var runtime = Runtime(ctx)
         var context = runtime.context()
 
@@ -56,7 +55,7 @@ __async def _increment_twice(
 
 
 def test_tasks_make_progress_without_corrupting_shared_state() raises:
-    with DeviceContext() as ctx:
+    with CpuDeviceContext() as ctx:
         var runtime = Runtime(ctx)
         var context = runtime.context()
 
@@ -96,7 +95,7 @@ __async def _no_yield(value: Int) -> Int:
 
 
 def test_mixed_yielding_and_non_yielding_tasks_complete_correctly() raises:
-    with DeviceContext() as ctx:
+    with CpuDeviceContext() as ctx:
         var runtime = Runtime(ctx)
         var context = runtime.context()
 
@@ -124,7 +123,7 @@ __async def _nested_yield[n: Int](ctx: Context) -> Int:
 
 
 def test_nested_yielding_tasks() raises:
-    with DeviceContext() as ctx:
+    with CpuDeviceContext() as ctx:
         var runtime = Runtime(ctx)
         var context = runtime.context()
 
@@ -157,7 +156,7 @@ __async def _awaits_suspends_twice(ctx: Context) -> Int:
 
 
 def test_awaited_coroutine_suspending_twice() raises:
-    with DeviceContext() as ctx:
+    with CpuDeviceContext() as ctx:
         var runtime = Runtime(ctx)
         var context = runtime.context()
 

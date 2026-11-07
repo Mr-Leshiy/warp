@@ -7,13 +7,12 @@ that side effect and the values it returns, without depending on `Runtime`
 being drained through any other call first.
 """
 
-from max.gpu.host import DeviceContext
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
 from warp.context import Context
 from warp.runtime import Runtime
 
-from tests.common import suspend
+from tests.common import CpuDeviceContext, suspend
 
 
 __async def _yield_once(ctx: Context) -> Int:
@@ -29,7 +28,7 @@ __async def _yields_twice[VALUE: Int](ctx: Context) -> Int:
 
 
 def test_task_completes_with_its_result() raises:
-    with DeviceContext() as ctx:
+    with CpuDeviceContext() as ctx:
         var runtime = Runtime(ctx)
         var context = runtime.context()
 
@@ -43,7 +42,7 @@ def test_task_completes_with_its_result() raises:
 
 
 def test_task_wait_returns_its_result() raises:
-    with DeviceContext() as ctx:
+    with CpuDeviceContext() as ctx:
         var runtime = Runtime(ctx)
         var context = runtime.context()
 
@@ -66,7 +65,7 @@ __async def _yield_n_times(ctx: Context, n: Int) -> Int:
 
 
 def test_task_yields_many_times_in_a_row_with_nothing_else_queued() raises:
-    with DeviceContext() as ctx:
+    with CpuDeviceContext() as ctx:
         var runtime = Runtime(ctx)
         var context = runtime.context()
 
