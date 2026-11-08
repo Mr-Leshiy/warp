@@ -22,11 +22,11 @@ __async def _raises_after_yield(ctx: Context) raises -> Int:
     raise Error("root failure")
 
 
-__async def _spawns_and_waits(runtime: Runtime, ctx: Context) raises -> Int:
+__async def _spawns_and_waits(runtime: Runtime) raises -> Int:
     var spawner = runtime.copy()
-    var first = spawner.add(_yields_twice[10](ctx))
-    var second = spawner.add(_yields_twice[20](ctx))
-    __await suspend(ctx)
+    var first = spawner.add(_yields_twice[10](runtime.context()))
+    var second = spawner.add(_yields_twice[20](runtime.context()))
+    __await suspend(runtime.context())
     return first^.wait() + second^.wait()
 
 
@@ -49,8 +49,7 @@ def test_block_on_root_spawns_and_waits_on_other_tasks() raises:
     with CpuDeviceContext() as ctx:
         var runtime = Runtime(ctx)
         var spawner = runtime.copy()
-        var context = runtime.context()
-        assert_equal(runtime.block_on(_spawns_and_waits(spawner, context)), 30)
+        assert_equal(runtime.block_on(_spawns_and_waits(spawner)), 30)
 
 
 def main() raises:

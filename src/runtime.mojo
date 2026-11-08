@@ -17,9 +17,7 @@ from .task import RaisingTask, Task
 from .task.handle import _TaskHandle
 
 
-# TODO: revisit `Copyable` (added so tests can hand coroutines their own
-# runtime handle); consider making `Runtime` `Movable` only again.
-struct Runtime[target: CompilationTarget](Copyable):
+struct Runtime[target: CompilationTarget](Movable, Copyable):
     """Runs coroutines that share one GPU device context.
 
     Tasks are queued by `add` and only make progress inside `wait`, which
