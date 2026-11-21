@@ -31,14 +31,6 @@ mojo.workspace = true
 [tasks]
 fmt    = "mojo format ."
 
-# Build the API documentation site into docs/site/public:
-#   1. modo runs `mojo doc`, copies each package README.md in as an Overview
-#      page, and emits Hugo content (see modo.yaml). Invoked as `python -m
-#      pymodo` (the documented fallback) so it works without depending on the
-#      `modo` console script being exposed on PATH.
-#   2. `hugo` renders the static HTML site (theme fetched via Hugo Modules).
-docs = "python -m pymodo build && hugo --source docs/site"
-
 # The runner loop lives in a script because pixi's cross-platform task shell
 # has no loops.
 test   = "python scripts/test.py"
@@ -47,9 +39,23 @@ test   = "python scripts/test.py"
 mojo.workspace = true
 max.workspace = true
 warp = { path = "." }
-rust = ">=1.80.0,<2"
-hugo = ">=0.163.3,<0.164"
-go = ">=1.26.4,<2"
 
 [pypi-dependencies]
 pymodo = ">=0.11.13, <0.12"
+
+# Docs-only tooling, kept out of the default environment.
+[feature.docs.tasks]
+# Build the API documentation site into docs/site/public:
+#   1. modo runs `mojo doc`, copies each package README.md in as an Overview
+#      page, and emits Hugo content (see modo.yaml). Invoked as `python -m
+#      pymodo` (the documented fallback) so it works without depending on the
+#      `modo` console script being exposed on PATH.
+#   2. `hugo` renders the static HTML site (theme fetched via Hugo Modules).
+docs = "python -m pymodo build && hugo --source docs/site"
+
+[feature.docs.dependencies]
+hugo = ">=0.163.3,<0.164"
+go = ">=1.26.4,<2"
+
+[environments]
+docs = ["docs"]
