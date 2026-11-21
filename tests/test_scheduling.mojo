@@ -145,9 +145,9 @@ __async def _suspends_twice(ctx: Context) -> Int:
     # The prints are load-bearing: without work between the two
     # suspensions the bug doesn't show up.
     __await suspend(ctx)
-    print("after suspend 1")
+    # print("after suspend 1")
     __await suspend(ctx)
-    print("after suspend 2")
+    # print("after suspend 2")
     return 2
 
 
@@ -175,7 +175,4 @@ def test_awaited_coroutine_suspending_twice() raises:
 
 def main() raises:
     var suite = TestSuite.discover_tests[__functions_in_module()]()
-    # TODO: stop skipping once https://github.com/modular/modular/issues/7368
-    # is resolved; until then this test hangs.
-    suite.skip[test_awaited_coroutine_suspending_twice]()
     suite^.run()
